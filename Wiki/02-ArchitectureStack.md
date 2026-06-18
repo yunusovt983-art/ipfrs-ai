@@ -1,3 +1,13 @@
+---
+title: 02-ArchitectureStack
+type: architecture
+summary: 6-слойная архитектура от UI до железа; контроль потока через слои
+tags: [ipfrs, architecture, layers]
+related: ["[[01-Overview]]", "[[03-BoundedContexts]]", "[[09-DataFlows]]"]
+read_time: 30 мин
+updated: 2026-06-18
+---
+
 # 6-Слойная архитектура IPFRS
 
 **Краткое резюме**: IPFRS имеет 6 чётко разделённых слоёв. Каждый слой может быть понят независимо, но вместе они образуют согласованную систему.

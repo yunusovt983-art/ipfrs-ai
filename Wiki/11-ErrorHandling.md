@@ -1,3 +1,13 @@
+---
+title: 11-ErrorHandling
+type: reference
+summary: Обработка ошибок и восстановление — категории сбоев, retry, circuit breaker, по доменам
+tags: [ipfrs, errors, resilience, recovery]
+related: ["[[04-StorageDomain]]", "[[05-NetworkDomain]]", "[[10-Performance]]"]
+read_time: 35 мин
+updated: 2026-06-18
+---
+
 # Error Handling & Recovery: Надёжность в действии
 
 **Краткое резюме**: Распределённая система сложнее обычного приложения. Здесь описаны типичные сбои и как IPFRS их обрабатывает.

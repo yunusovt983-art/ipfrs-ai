@@ -1,3 +1,12 @@
+---
+title: README
+type: navigation
+summary: Точка входа в Wiki — навигация по ролям (архитектор/инженер/DevOps/контрибьютор)
+tags: [meta, readme, navigation]
+related: ["[[INDEX]]", "[[WIKI_SCHEMA]]", "[[01-Overview]]"]
+updated: 2026-06-18
+---
+
 # IPFRS Wiki: Второй мозг распределённой системы
 
 > Это wiki-документация IPFRS (Inter-Planetary File Rust System) в стиле заметок о глубоком обучении. Здесь собраны ключевые идеи, инсайты и понимание того, как работает система.

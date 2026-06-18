@@ -1,3 +1,14 @@
+---
+title: 05-NetworkDomain
+type: domain
+summary: Распределённая сеть — Peer-агрегат, Kademlia DHT, два уровня репутации, ACL libp2p
+tags: [ipfrs, network, ddd, dht, kademlia]
+source: crates/ipfrs-network/src/
+related: ["[[03-BoundedContexts]]", "[[08-TransportDomain]]", "[[09-DataFlows]]"]
+read_time: 40 мин
+updated: 2026-06-18
+---
+
 # Network Domain: Распределённая сеть и DHT
 
 **Краткое резюме**: Network Domain управляет peer-to-peer сетью. Его задача: "Кто имеет данные и где они находятся?" Использует Kademlia DHT для распределённого поиска.

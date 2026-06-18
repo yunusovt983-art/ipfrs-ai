@@ -1,3 +1,13 @@
+---
+title: 10-Performance
+type: performance
+summary: Метрики латентности/пропускной способности, потребление памяти, узкие места
+tags: [ipfrs, performance, metrics]
+related: ["[[02-ArchitectureStack]]", "[[09-DataFlows]]", "[[11-ErrorHandling]]"]
+read_time: 30 мин
+updated: 2026-06-18
+---
+
 # Производительность: Метрики и модели
 
 **Краткое резюме**: Практические числа для каждой операции в IPFRS. Где система быстрая, где медленная, и почему. Важно для понимания trade-off'ов и оптимизаций.

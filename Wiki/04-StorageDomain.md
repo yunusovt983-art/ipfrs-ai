@@ -1,3 +1,14 @@
+---
+title: 04-StorageDomain
+type: domain
+summary: Хранилище блоков и CID — Block-агрегат, BlockStore-порт, stacked decorators, GC
+tags: [ipfrs, storage, ddd, cid, block]
+source: crates/ipfrs-storage/src/
+related: ["[[03-BoundedContexts]]", "[[09-DataFlows]]", "[[10-Performance]]"]
+read_time: 40 мин
+updated: 2026-06-18
+---
+
 # Storage Domain: Хранилище блоков и CID
 
 **Краткое резюме**: Storage Domain управляет хранением неизменяемых блоков. Каждый блок идентифицируется криптографическим хешем (CID). Инвариант: `hash(data) == cid` **всегда** верен.

@@ -1,3 +1,14 @@
+---
+title: 08-TransportDomain
+type: domain
+summary: Надёжный обмен блоками — Session-агрегат, Bitswap, WantList с приоритетами, peer scoring
+tags: [ipfrs, transport, ddd, bitswap, session]
+source: crates/ipfrs-transport/src/
+related: ["[[03-BoundedContexts]]", "[[05-NetworkDomain]]", "[[09-DataFlows]]"]
+read_time: 40 мин
+updated: 2026-06-18
+---
+
 # Transport Domain: Надёжный обмен блоками
 
 **Краткое резюме**: Transport Domain отвечает на вопрос "Как обмениваться блоками надёжно?" Использует Bitswap протокол с приоритетными очередями и peer scoring.

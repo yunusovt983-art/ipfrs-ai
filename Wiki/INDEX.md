@@ -1,11 +1,33 @@
+---
+title: INDEX
+type: navigation
+summary: Полный каталог Wiki по категориям с одностроночными summary и метаданными
+tags: [meta, index, navigation]
+related: ["[[README]]", "[[WIKI_SCHEMA]]", "[[log]]"]
+updated: 2026-06-18
+---
+
 # IPFRS Wiki - Полный индекс и навигация
 
 > Добро пожаловать в IPFRS Wiki - второй мозг распределённой системы.
 
 **Версия**: 0.2.0  
 **Язык**: Русский  
-**Стиль**: Заметки Андрея Карпати  
+**Стиль**: Заметки Андрея Карпати ([LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f))  
 **Статус**: ✅ Complete
+
+---
+
+## ⚙️ Meta-слой (паттерн Карпати «LLM Wiki»)
+
+| Файл | Роль |
+|------|------|
+| **[[WIKI_SCHEMA]]** | Схема — правила поддержки Wiki, трёхслойная архитектура, workflows (ingest/query/lint) |
+| **[[log]]** | Append-only хроника эволюции (`## [date] op \| title`) |
+| **[[README]]** | Точка входа, навигация по ролям |
+| **[[INDEX]]** | Этот файл — каталог по категориям |
+
+> 🤖 **Для LLM-агента**: прочитай [[WIKI_SCHEMA]] перед любой операцией. Источник истины — код в `Vendor/ipfrs/crates/**` (Слой 1), Wiki компилируется из него.
 
 ---
 
@@ -48,20 +70,25 @@
 
 ### 🔬 Глубокие погружения по доменам
 
-4. **[04-StorageDomain.md](04-StorageDomain.md)** - Хранилище (Sled, блоки, CID)
-   - *(В процессе создания - см. README для информации)*
+4. **[[04-StorageDomain]]** - Хранилище (Sled, блоки, CID)
+   - Block-агрегат, BlockStore-порт, stacked decorators, GC
+   - source: `crates/ipfrs-storage/src/` · ⏱️ 40 мин · ✅ Complete
 
-5. **[05-NetworkDomain.md](05-NetworkDomain.md)** - Сеть (libp2p, DHT, peer discovery)
-   - *(В процессе создания - см. README для информации)*
+5. **[[05-NetworkDomain]]** - Сеть (libp2p, DHT, peer discovery)
+   - Peer-агрегат, Kademlia DHT, два уровня репутации, ACL libp2p
+   - source: `crates/ipfrs-network/src/` · ⏱️ 40 мин · ✅ Complete
 
-6. **[06-SemanticDomain.md](06-SemanticDomain.md)** - Семантика (HNSW, векторный поиск)
-   - *(В процессе создания - см. README для информации)*
+6. **[[06-SemanticDomain]]** - Семантика (HNSW, векторный поиск)
+   - VectorIndex, k-NN, квантование, reranking
+   - source: `crates/ipfrs-semantic/src/` · ⏱️ 40 мин · ✅ Complete
 
-7. **[07-LogicDomain.md](07-LogicDomain.md)** - Логика (backward chaining, вывод)
-   - *(В процессе создания - см. README для информации)*
+7. **[[07-LogicDomain]]** - Логика (backward chaining, вывод)
+   - IR Term/Rule/KB, нейро-символический синтез
+   - source: `crates/ipfrs-tensorlogic/src/` · ⏱️ 45 мин · ✅ Complete
 
-8. **[08-TransportDomain.md](08-TransportDomain.md)** - Транспорт (Bitswap, сессии)
-   - *(В процессе создания - см. README для информации)*
+8. **[[08-TransportDomain]]** - Транспорт (Bitswap, сессии)
+   - Session-агрегат, WantList с приоритетами, peer scoring
+   - source: `crates/ipfrs-transport/src/` · ⏱️ 40 мин · ✅ Complete
 
 ---
 
@@ -91,8 +118,9 @@
 
 ### ⚠️ Обработка ошибок и восстановление
 
-11. **[11-ErrorHandling.md](11-ErrorHandling.md)** - Обработка ошибок и recovery
-    - *(В процессе создания - см. README для информации)*
+11. **[[11-ErrorHandling]]** - Обработка ошибок и recovery
+    - Категории сбоев, retry с backoff, circuit breaker, по доменам
+    - ⏱️ 35 мин · ✅ Complete
 
 ---
 
@@ -254,11 +282,12 @@ Memory (1TB):       ~4.5 GB
 ---
 
 **Общая статистика Wiki**:
-- Статей: 11 (8 완成, 3 in progress)
-- Строк: 2500+ (и растёт)
-- Примеров: 100+
+- Статей: 11 (✅ все complete) + 4 meta-файла (README, INDEX, WIKI_SCHEMA, log)
+- Строк: 4,600+
+- Примеров кода: 100+ (с `file:line` привязкой к источнику)
 - Диаграмм: 50+
 - Время чтения: 3-5 часов (полностью)
+- Паттерн: Karpathy LLM Wiki (3 слоя: источники → wiki → схема)
 
 ---
 

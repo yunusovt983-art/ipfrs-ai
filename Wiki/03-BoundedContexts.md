@@ -1,3 +1,13 @@
+---
+title: 03-BoundedContexts
+type: architecture
+summary: 5 ограниченных контекстов DDD (Storage, Network, Semantic, Logic, Transport) и их взаимодействие
+tags: [ipfrs, ddd, bounded-contexts]
+related: ["[[02-ArchitectureStack]]", "[[04-StorageDomain]]", "[[05-NetworkDomain]]", "[[06-SemanticDomain]]", "[[07-LogicDomain]]", "[[08-TransportDomain]]"]
+read_time: 40 мин
+updated: 2026-06-18
+---
+
 # 5 Bounded Contexts: Пять независимых миров
 
 **Краткое резюме**: IPFRS построена на Domain-Driven Design. Пять bounded contexts (доменов) полностью независимы и взаимодействуют только через чистые интерфейсы. Каждый имеет свой язык, концепции и модели.

@@ -1,3 +1,14 @@
+---
+title: 06-SemanticDomain
+type: domain
+summary: Поиск по смыслу — HNSW VectorIndex, k-NN, квантование, reranking
+tags: [ipfrs, semantic, ddd, hnsw, embeddings]
+source: crates/ipfrs-semantic/src/
+related: ["[[03-BoundedContexts]]", "[[07-LogicDomain]]", "[[09-DataFlows]]"]
+read_time: 40 мин
+updated: 2026-06-18
+---
+
 # Semantic Domain: Поиск по смыслу через HNSW
 
 **Краткое резюме**: Semantic Domain отвечает на вопрос "Что это означает?" с помощью векторной индексации. Используется HNSW (Hierarchical Navigable Small World) для быстрого поиска похожих документов.

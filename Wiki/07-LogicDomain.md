@@ -1,3 +1,14 @@
+---
+title: 07-LogicDomain
+type: domain
+summary: Логический вывод TensorLogic — IR Term/Rule/KB, backward chaining, нейро-символический синтез
+tags: [ipfrs, logic, ddd, tensorlogic, inference]
+source: crates/ipfrs-tensorlogic/src/
+related: ["[[03-BoundedContexts]]", "[[06-SemanticDomain]]", "[[09-DataFlows]]"]
+read_time: 45 мин
+updated: 2026-06-18
+---
+
 # Logic Domain: Логический вывод и TensorLogic
 
 **Краткое резюме**: Logic Domain отвечает на вопрос "Что мы можем вывести?" с помощью backward chaining. Distinctive feature IPFRS — **neural-symbolic fusion**: логический вывод + семантический fallback.
