@@ -16,70 +16,76 @@
 
 ---
 
-## Агрегат: BlockExchangeSession
+## Агрегат: Session
+
+**Source**: `crates/ipfrs-transport/src/session.rs`
 
 ### Структура
 
 ```rust
-pub struct BlockExchangeSession {
-    session_id: SessionId,           // Unique per request batch
-    requested_blocks: Vec<Cid>,      // What user wants
-    received_blocks: HashSet<Cid>,   // What's arrived
-    want_list: WantList,             // Priority queue
-    peer_selection: PeerScores,      // Reputation-based
-    state: SessionState,             // State machine
-    created_at: Instant,
-    stats: SessionStats,             // Timing, retries, etc.
+// transport/session.rs
+pub struct Session {
+    id: SessionId,                       // = u64
+    config: SessionConfig,
+    state: Arc<RwLock<SessionState>>,
+    blocks: Arc<DashMap<Cid, BlockRequest>>,
+    stats: Arc<RwLock<SessionStats>>,
+    event_tx: Option<mpsc::UnboundedSender<SessionEvent>>,
+    state_tx/state_rx: watch::Sender/Receiver<SessionState>,  // reactive state
 }
 
-pub enum SessionState {
-    Created,                         // Initialized
-    Active,                          // Fetching
-    Paused,                          // Temporarily stopped
-    Completed,                       // Got all blocks
-    Failed(String),                  // Give up
-}
-
-pub struct SessionStats {
-    blocks_received: u64,
-    total_bytes: u64,
-    start_time: Instant,
-    peer_switches: u64,             // How many peer changes
+pub enum SessionState { 
+    Active, Paused, Completing, 
+    Completed, Cancelled 
 }
 ```
 
-### Инварианты
+### Инварианты & State Machine
 
-```
-1. received_blocks ⊆ requested_blocks  (always)
-2. State transitions follow valid paths only
-3. session timeout = 30 seconds (configurable)
-4. If received_blocks == requested_blocks → state = Completed
-```
+- **Valid transitions**: `Active→{Paused, Completing, Completed, Cancelled}`, `Paused→Active`, `*→Cancelled`
+- **Terminal**: `Completed`, `Cancelled` (no revival)
+- **Completion invariant**: session enters `Completed` только when `blocks_received + blocks_failed ≥ total_blocks` (`SessionStats::is_complete()`)
+- A block marked received/failed exactly once
+
+**Repository**: `SessionManager` (session.rs:462+) over `DashMap<SessionId, Arc<Session>>`
+Methods: `create/get/remove/active_sessions/cleanup_completed/recv_event`
 
 ---
 
 ## WantList & Priority
 
+**Source**: `crates/ipfrs-transport/src/want_list.rs`
+
 ```rust
-pub struct WantList {
-    entries: HashMap<Cid, WantEntry>,
-    priority_queue: BinaryHeap<(Priority, Cid)>,
-    config: WantListConfig,
+// want_list.rs
+pub enum Priority { 
+    Low=0, Normal=50, 
+    High=100, Urgent=200, 
+    Critical=300 
 }
 
-pub struct WantEntry {
-    cid: Cid,
-    priority: i32,                  // 0-100 (higher = urgent)
-    send_dont_have: bool,           // Ask peer if they DON'T have it
-    cancel: bool,                   // Retract want
-}
+pub struct WantEntry { 
+    cid, priority, created_at, 
+    expires_at, retry_count,
+    send_dont_have, deadline, tag 
+}   // effective_priority() boosts near deadline
 
-pub struct WantListConfig {
-    max_entries: usize,             // Typically 1000
-    batch_size: usize,              // Send in groups of 100
+pub struct WantList { 
+    heap: BinaryHeap<HeapEntry>, 
+    entries: HashMap<Cid,(WantEntry,u64)>, 
+    version_counter, config 
 }
 ```
+
+**Сложность**: O(log n) push/pop + O(1) dedup via lazy deletion (version markers skip stale heap entries)
+
+**Retry backoff**: `base·2^min(retry,6)` capped 32×, with jitter
+
+**Инварианты**:
+- one entry per CID
+- heap ≤ `max_wants`
+- FIFO within priority
+- deadline-elevated priority
 
 ### Priority Semantics
 

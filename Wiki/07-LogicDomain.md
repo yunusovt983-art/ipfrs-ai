@@ -19,93 +19,76 @@
 
 ## Domain Model: Logic IR
 
-### Term
+**Source**: `crates/ipfrs-tensorlogic/src/ir.rs`
 
 ```rust
+// tensorlogic/ir.rs:13–22
 pub enum Term {
-    Const(Constant),           // "alice", 42, true, Date(...)
-    Var(String),              // "X", "Y", "Result"
-    Compound(String, Vec<Term>), // f(X, Y, Z)
+    Var(String),                      // ?X
+    Const(Constant),
+    Fun(String, Vec<Term>),           // f(X,Y)
+    Ref(TermRef),                     // CID-addressed external term
 }
 
-// Examples:
-Term::Const("alice")              // Atom
-Term::Var("X")                    // Variable
-Term::Compound("parent", vec![    // Structured
-    Term::Const("alice"),
-    Term::Var("X")
-])
-```
-
-### Predicate
-
-```rust
-pub struct Predicate {
-    name: String,              // "parent", "ancestor", "loves"
-    args: Vec<Term>,           // Arguments (can contain variables)
+pub enum Constant { 
+    String(String), Int(i64), Bool(bool), 
+    Float(String)  // Float-as-string ⟹ deterministic hash
 }
 
-// Example: ancestor(X, bob)
-// Predicate { name: "ancestor", args: [Var("X"), Const("bob")] }
+pub struct TermRef { 
+    pub cid: Cid, 
+    pub hint: Option<String> 
+}                             // :38–63
+
+pub struct Predicate { 
+    pub name: String, 
+    pub args: Vec<Term> 
+}                              // :163
+
+pub struct Rule { 
+    pub head: Predicate, 
+    pub body: Vec<Predicate> 
+}                              // Horn clause :216
+
+pub struct KnowledgeBase { 
+    pub facts: Vec<Predicate>, 
+    pub rules: Vec<Rule> 
+}                              // aggregate root :277
+
+pub type Substitution = HashMap<String, Term>  // Variable bindings - key VO
 ```
 
-### Rule
-
-```rust
-pub struct Rule {
-    head: Predicate,           // What we're proving
-    body: Vec<Predicate>,      // Conditions that must hold
-}
-
-// Example: ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)
-// Rule {
-//     head: Predicate { name: "ancestor", args: [Var("X"), Var("Z")] },
-//     body: [
-//         Predicate { name: "parent", args: [Var("X"), Var("Y")] },
-//         Predicate { name: "ancestor", args: [Var("Y"), Var("Z")] }
-//     ]
-// }
-```
-
-### Fact
-
-```rust
-pub struct Fact {
-    predicate: Predicate,      // Must have NO variables
-}
-
-// Example: parent(alice, bob)
-// Fact { predicate: Predicate { name: "parent", 
-//        args: [Const("alice"), Const("bob")] } }
-```
+**Инварианты** (`rule_validator.rs`):
+- KB facts ground (no free vars)
+- rule-dependency graph acyclic
+- head vars bound by body → `ValidationError::UnboundVariable/CircularDependency`
+- identical rule ⟹ identical CID
 
 ---
 
-## Core Algorithm: Unification
+## Inference Services
+
+**Source**: `crates/ipfrs-tensorlogic/src/reasoning.rs`
 
 ```rust
-pub fn unify(term1: &Term, term2: &Term, 
-             subst: &mut Substitution) -> bool {
-    match (term1, term2) {
-        // Same constant → unify
-        (Const(c1), Const(c2)) => c1 == c2,
-        
-        // Variable unifies with anything
-        (Var(v), t) | (t, Var(v)) => {
-            if occurs_check(v, t) { return false; }  // Prevent cycles
-            subst.insert(v.clone(), t.clone());
-            true
-        }
-        
-        // Compounds: names match, unify args recursively
-        (Compound(f1, args1), Compound(f2, args2)) => {
-            if f1 != f2 || args1.len() != args2.len() { return false; }
-            args1.iter().zip(args2).all(|(a1, a2)| unify(a1, a2, subst))
-        }
-        
-        _ => false
-    }
+// reasoning.rs — backward chaining (SLD resolution)
+pub struct InferenceEngine { 
+    max_depth, max_solutions: usize, 
+    cycle_detection: bool 
 }
+
+fn query(goal, kb) -> Result<Vec<Substitution>>
+fn prove(goal, kb) -> Result<Option<Proof>>      // Proof{goal, rule, subproofs}
+fn verify(proof, kb) -> Result<bool>
+// + unify_predicates, rename_rule_vars (capture avoidance), apply_subst_predicate
+```
+
+**Variants**:
+- `TabledInferenceEngine`/`FixpointEngine` (recursive_reasoning.rs, SLG tabling)
+- `FuzzyLogicEngine` (Mamdani/Sugeno + defuzzification)
+- `epistemic_logic.rs` (S5 Kripke, `Knows/CommonKnowledge`)
+- `ProbabilisticLogicNetwork` (`TruthValue{strength, confidence}`, OpenCog-style)
+- `BayesianNetwork` (VarElim/BeliefProp/Sampling)
 
 // Example:
 // unify(parent(X, bob), parent(alice, bob))

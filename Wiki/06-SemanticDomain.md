@@ -16,34 +16,39 @@
 
 ---
 
-## Domain Model: HNSW Index
+## Domain Model: VectorIndex (HNSW)
+
+**Source**: `crates/ipfrs-semantic/src/hnsw.rs`
 
 ### Структура
 
 ```rust
-pub struct HnswIndex<T> {
-    vectors: Vec<T>,           // Stored vectors (indices matter)
-    layers: Vec<Layer<T>>,     // Hierarchical graph structure
-    entry_point: usize,        // Root for search
-    max_connections: usize,    // M parameter (default: 16)
-    ef_construction: usize,    // Search radius during insert (200)
-    ef_search: usize,          // Search radius during query (50)
-}
-
-pub struct Layer<T> {
-    nodes: Vec<Node<T>>,       // Nodes at this level
-    neighbors: Vec<Vec<usize>>, // Adjacency lists (edges)
+// semantic/hnsw.rs
+pub struct VectorIndex {
+    index: Arc<RwLock<Hnsw<'static, f32, DistL2>>>,  // hnsw_rs backend
+    id_to_cid: Arc<RwLock<HashMap<usize, Cid>>>,
+    cid_to_id: Arc<RwLock<HashMap<Cid, usize>>>,
+    vectors:   Arc<RwLock<HashMap<Cid, Vec<f32>>>>,  // originals for rebuild/migrate
+    next_id:   Arc<RwLock<usize>>,
+    dimension: usize,
+    metric:    DistanceMetric,                        // L2 | Cosine | DotProduct
+    tracker:   Arc<RwLock<IncrementalTracker>>,       // dirty-set for snapshots
 }
 ```
 
-### Инварианты
+### HNSW структура & параметры
 
-```
-1. Higher layers are sparser (fewer nodes)
-2. Connection count per node ≤ max_connections (16)
-3. Entry point always present
-4. Layers properly linked (Layer 0 densest, Layer N sparsest)
-```
+Auto-tuned по размеру (hnsw.rs:442):
+- `<10k → (M=16, ef_c=200)`
+- `<100k → (32,400)`
+- else `(48,600)`
+
+**Инварианты**:
+1. Dimension consistency (reject mismatched vectors)
+2. CID uniqueness
+3. No NaN/Inf (normalize guards `norm>0`)
+4. Cosine score ∈ [0,1] / L2 ∈ [0,∞)
+5. Monotonic internal ids, `created_at ≤ updated_at`
 
 ---
 
@@ -126,6 +131,39 @@ distance(A, B) = 1 - |A ∩ B| / |A ∪ B|
 Range: [0, 1]
 Properties: For sparse categorical data
 ```
+
+---
+
+## Domain Services
+
+**Source**: `crates/ipfrs-semantic/src/{embedding_pipeline,vector_quantizer,query_planner,search_pipeline,reranking,simd}.rs`
+
+### Основные сервисы
+
+- **`EmbeddingPipeline`** (embedding_pipeline.rs): `EmbeddingInput{RawBytes|Text|Structured|Embedding}` → normalized `Vec<f32>`
+  - Normalization: `None|L2|MinMax|ZScore`
+
+- **`VectorQuantizer`** (vector_quantizer.rs): Product Quantization
+  - Split D into M subspaces, k-means K≤256 centroids each
+  - Encode → M bytes, `asymmetric_distance` for query-to-code
+
+- **`NearestNeighborQueryPlanner`** (query_planner.rs):
+  - `ExecutionStrategy{LocalOnly|RemoteFanout|Hybrid|Cached}`
+  - Фильтрует shards по latency budget, prefer-local
+
+- **`SemanticSearchPipeline`** (search_pipeline.rs): vector + BM25 → fusion (`RRF|LinearCombination|CombSUM`)
+
+- **`ReRanker`** (reranking.rs): `WeightedCombination|ReciprocalRankFusion|LearnToRank`
+
+- **Distribution**: `ShardCoordinator` (consistent-hash ring, FNV-1a, 150 virtual nodes/shard)
+
+- **SIMD** (simd.rs): runtime NEON/AVX dispatch для `l2/dot/cosine`
+
+### Узкие места
+
+HNSW память ≈ `n·(dim·4 + M·8)` (768-d, M=16, 10M ≈ 30 GB)
+- Mitigation: PQ (≈12,000× compression, ~0.5–1% recall loss) или DiskANN
+- Classic recall↔latency knobs: M / ef_construction / ef_search
 
 ---
 
