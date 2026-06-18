@@ -198,6 +198,106 @@ graph TD
 
 ---
 
+## Crate Dependency Graph
+
+```mermaid
+graph TD
+    %% FFI layer
+    PY["🐍 ipfrs-python\nPyO3 · 590 lines"]
+    NJS["📦 ipfrs-nodejs\nnapi-rs · 1K lines"]
+    WASM["🌐 ipfrs-wasm\nwasm-bindgen · 2K lines"]
+
+    %% Interface + CLI
+    CLI["💻 ipfrs-cli\nclap · ratatui · 12K lines"]
+    IF["🚪 ipfrs-interface\nGateway · gRPC · GraphQL · 17K lines"]
+
+    %% Application
+    NODE["🧠 ipfrs\nNode / Orchestrator · 15K lines"]
+
+    %% Domain layer
+    ST["💾 ipfrs-storage\nSled · WAL · GC · 135K lines"]
+    NW["🌐 ipfrs-network\nlibp2p · Kademlia · 156K lines"]
+    SM["🔍 ipfrs-semantic\nHNSW · DiskANN · 142K lines"]
+    TL["🤖 ipfrs-tensorlogic\n8 engines · autograd · 156K lines"]
+    TR["📡 ipfrs-transport\nBitswap · QUIC · 34K lines"]
+
+    %% Shared Kernel
+    CORE["⚙️ ipfrs-core\nCid · Block · Ipld · 23K lines"]
+
+    %% FFI → node
+    PY  --> NODE
+    PY  --> TL
+    NJS --> NODE
+    NJS --> TL
+    WASM -.->|"no internal deps"| CORE
+
+    %% CLI
+    CLI --> NODE
+    CLI --> IF
+    CLI --> TL
+
+    %% Interface → domains
+    IF --> NODE
+    IF --> ST
+    IF --> NW
+    IF --> SM
+    IF --> TL
+
+    %% Node → all domains
+    NODE --> ST
+    NODE --> NW
+    NODE --> SM
+    NODE --> TL
+    NODE --> TR
+
+    %% Domain cross-deps
+    NW --> TL
+    SM --> ST
+    SM --> NW
+    SM --> TL
+    TR --> ST
+    TR --> NW
+    TR --> TL
+    TL --> ST
+
+    %% All → core
+    ST  --> CORE
+    NW  --> CORE
+    SM  --> CORE
+    TL  --> CORE
+    TR  --> CORE
+    NODE --> CORE
+    IF  --> CORE
+    CLI --> CORE
+
+    %% Styles
+    classDef ffi      fill:#fdf4ff,stroke:#d8b4fe,color:#581c87
+    classDef app      fill:#d4edda,stroke:#10b981,color:#064e3b
+    classDef gateway  fill:#cffafe,stroke:#06b6d4,color:#164e63
+    classDef domain   fill:#dbeafe,stroke:#60a5fa,color:#1e3a8a
+    classDef tl       fill:#fff7ed,stroke:#f97316,color:#c2410c
+    classDef storage  fill:#fee2e2,stroke:#f87171,color:#7f1d1d
+    classDef semantic fill:#ede9fe,stroke:#a78bfa,color:#4c1d95
+    classDef transport fill:#d1fae5,stroke:#34d399,color:#064e3b
+    classDef core     fill:#fef3c7,stroke:#f59e0b,color:#78350f
+
+    class PY,NJS,WASM ffi
+    class NODE app
+    class IF gateway
+    class CLI gateway
+    class NW domain
+    class TL tl
+    class ST storage
+    class SM semantic
+    class TR transport
+    class CORE core
+```
+
+> **Ключевое наблюдение:** `ipfrs-tensorlogic` — самый «горизонтальный» крейт:  
+> его импортируют 8 из 12 крейтов (network, semantic, transport, interface, cli, node, nodejs, python).
+
+---
+
 ## Lines of Code
 
 | Crate | Files | Lines |
