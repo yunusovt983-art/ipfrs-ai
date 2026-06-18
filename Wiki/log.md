@@ -14,6 +14,12 @@ updated: 2026-06-18
 
 ---
 
+## [2026-06-18] ingest | Перевод IPFRS_DEEP_ARCHITECTURE.md → Wiki
+- Создан [[13-DeepArchitecture]] — русский перевод (1910 строк → 1864 строки)
+- 14 разделов: обзор, 6 слоёв, 5 контекстов, 4 потока данных, Tokio рантайм, storage/сеть/семантика/логика deep dives, память, ошибки
+- YAML frontmatter, wikilinks, cross-references на все связанные статьи
+- Обновлён [[INDEX]]: 13 статей, 7,400+ строк
+
 ## [2026-06-18] ingest | Перевод IPFRS_ARCHITECTURE_MASTER.md → Wiki
 - Создан [[12-MasterArchitecture]] — русский перевод мастер-документа (Opus 4.8, 872 строки)
 - 14 частей: стратегическая карта, Shared Kernel, 5 доменов, 2 потока данных, инварианты, компромиссы
