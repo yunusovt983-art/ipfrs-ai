@@ -90,7 +90,9 @@ pub struct WantList {
 
 **Сложность**: O(log n) push/pop + O(1) dedup via lazy deletion (version markers skip stale heap entries)
 
-**Retry backoff**: `base·2^min(retry,6)` capped 32×, with jitter
+**Retry backoff** (`want_list.rs:437–459`): `base · 2^min(retry,10)` (cap 1024×), with jitter
+<!-- lint 2026-06-18: было ошибочно "2^min(retry,6) capped 32×"; код использует min(10) → cap 2^10 -->
+- Реализация: `base.saturating_mul(1 << retry_count.min(10))`
 
 **Инварианты**:
 - one entry per CID

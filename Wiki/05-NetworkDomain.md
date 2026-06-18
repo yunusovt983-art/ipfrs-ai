@@ -121,30 +121,41 @@ Properties:
 
 ## Reputation Scoring (Network Context)
 
-**Вопрос**: "Является ли этот peer'надёжным для долгосрочной маршрутизации?"
+**Вопрос**: "Является ли этот peer надёжным для долгосрочной маршрутизации?"
+
+Network использует **несколько** скореров репутации (а не одну формулу). Их три плюс дешёвый in-band сигнал:
+
+**Сигнал `u8`** (`peer.rs:40`) на `PeerInfo` — дешёвый, clamp `[0,100]` через `saturating_add(..).min(100)` / `saturating_sub(..)`.
+
+**Композитный EWMA** (`reputation.rs:140+`, scoring `:215–279`):
 
 ```rust
+// reputation.rs — ReputationScore
 pub struct ReputationScore {
-    success_count: u64,
-    total_queries: u64,
-    last_updated: Instant,
-    weight: f64,  // Exponential decay by age
+    transfer_success_rate: f64,        // EWMA
+    latency_score, protocol_compliance_score, uptime_score: f64,
+    successful_transfers, failed_transfers, protocol_violations: u64,
 }
-
-impl ReputationScore {
-    pub fn score(&self) -> f64 {
-        let base_rate = self.success_count as f64 / (self.total_queries as f64 + 1.0);
-        let age_seconds = self.last_updated.elapsed().as_secs_f64();
-        let decay = (-age_seconds / HALF_LIFE).exp();
-        base_rate * decay
-    }
-}
-
-// Example:
-// Peer A: 95 successes / 100 queries, recent → score = 0.95 * 0.99 = 0.94
-// Peer B: 70 successes / 100 queries, stale  → score = 0.70 * 0.50 = 0.35
-// Network prefers Peer A
+// overall = Σ dimension * weight     (weights sum to 1.0)
+// update:  s_new = α·signal + (1-α)·s_old   ; α ≈ 0.2–0.4
+// decay:   s *= (1 - 0.1)  per tick
+// Profiles: Strict (0.85), Lenient (0.5), Performance (latency_weight 0.5)
 ```
+
+**Граф доверия** (`peer_reputation_graph.rs:115–130`):
+
+```rust
+// peer_reputation_graph.rs — ReputationScore
+pub struct ReputationScore {
+    direct_score: f64,       // EMA от прямых взаимодействий
+    propagated_score: f64,   // BFS многошаговое доверие, damping 0.5/hop, depth 3
+    combined_score: f64,     // 0.6*direct + 0.4*propagated
+    confidence, percentile: f64,
+}
+// edges weight ∈ [0,1]; trust_decay 0.99/tick; prune edges < 0.01
+```
+
+Плюс упрощённый `PrReputationScore {score, total_events, violations}` в `peer_reputation.rs`.
 
 ---
 
