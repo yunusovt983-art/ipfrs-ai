@@ -19,32 +19,40 @@
 
 ## Агрегат: Peer
 
+**Source**: `crates/ipfrs-network/src/peer.rs:22–76`
+
 ### Структура
 
 ```rust
-pub struct Peer {
-    peer_id: PeerId,              // = hash(public_key)
-    multiaddrs: Vec<Multiaddr>,   // How to reach it
-    reputation: ReputationScore,  // Trust metric
-    known_blocks: HashSet<Cid>,   // Blocks we heard it has
-    last_seen: Instant,           // When we last contacted
-    connection_state: ConnState,  // Connected/Idle/Active
+// network/peer.rs:22–41
+pub struct PeerInfo {
+    pub peer_id: String,            // VO: libp2p::PeerId stringified (ACL)
+    pub addrs: Vec<String>,         // Multiaddrs
+    pub protocols: Vec<String>,
+    pub last_seen: u64,
+    pub connection_count: u64,
+    pub avg_latency_ms: Option<u64>,
+    pub reputation: u8,             // 0..=100
 }
 
-pub enum ConnState {
-    Idle,                         // Not connected
-    Connecting,                   // Attempting connection
-    Connected { since: Instant }, // Online
-    Active { session: SessionId }, // Actively exchanging
+struct PeerRecord {                 // peer.rs:64–76 (internal aggregate state)
+    info: PeerInfo,
+    addrs: HashSet<Multiaddr>,
+    connected: bool,
+    connected_at: Option<Instant>,
+    latency_samples: Vec<Duration>, // bounded
 }
 ```
+
+**Repository**: `PeerStore` (peer.rs:175+) backed by `DashMap<PeerId, PeerRecord>` + `RwLock<HashSet<PeerId>>`
+Methods: `add_peer, get_peer, peer_connected, update_latency, increase/decrease_reputation, peers_by_reputation, peers_by_latency`
 
 ### Инварианты
 
 ```
 1. PeerId = hash(public_key)     (ВСЕГДА, immutable)
 2. multiaddrs не пусты если connected
-3. reputation >= 0.0
+3. reputation ∈ [0, 100]
 4. known_blocks = blocks we've heard peer announced
 ```
 

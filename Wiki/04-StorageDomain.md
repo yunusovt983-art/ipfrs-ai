@@ -19,20 +19,28 @@
 
 ## Агрегат: Block
 
+**Source**: `crates/ipfrs-core/src/block.rs:57–63`
+
 ### Структура
 
 ```rust
-pub struct Block {
+// core/block.rs:57–63
+pub struct Block { 
     cid: Cid,                    // Content Identifier (hash)
-    data: Bytes,                 // Неизменяемые данные
-    metadata: BlockMetadata,     // Время создания, счётчик доступа
+    data: Bytes                  // Неизменяемые данные (both private, no mutation API)
 }
 
-pub struct BlockMetadata {
-    size: u64,                   // Размер в байтах
-    created_at: Instant,         // Когда был создан
-    access_count: u64,           // Сколько раз был прочитан
-    pinned: bool,                // Защищен от GC?
+pub const MAX_BLOCK_SIZE: usize = 2 * 1024 * 1024;  // block.rs:37
+pub const MIN_BLOCK_SIZE: usize = 1;                // block.rs:40
+
+pub fn new(data: Bytes) -> Result<Self> {           // block.rs:70–74
+    Self::validate_size(data.len())?;               // INVARIANT 1
+    let cid = CidBuilder::new().build(&data)?;      // INVARIANT 2 (CID = H(data))
+    Ok(Self { cid, data })
+}
+
+pub fn verify(&self) -> Result<bool> {              // block.rs:117–120
+    Ok(CidBuilder::new().build(&self.data)? == self.cid)
 }
 ```
 
@@ -63,22 +71,31 @@ If unpinned + old → Garbage Collector deletes
 
 ## Published Port: BlockStore Trait
 
+**Source**: `crates/ipfrs-storage/src/traits.rs`
+
 ```rust
 #[async_trait]
 pub trait BlockStore: Send + Sync {
     async fn put(&self, block: &Block) -> Result<()>;
+    async fn put_many(&self, blocks: &[Block]) -> Result<()>;
     async fn get(&self, cid: &Cid) -> Result<Option<Block>>;
+    async fn get_many(&self, cids: &[Cid]) -> Result<Vec<Option<Block>>>;
     async fn has(&self, cid: &Cid) -> Result<bool>;
     async fn delete(&self, cid: &Cid) -> Result<()>;
-    async fn all_cids(&self) -> Result<Vec<Cid>>;
+    fn list_cids(&self) -> Result<Vec<Cid>>;
+    fn len(&self) -> usize; fn is_empty(&self) -> bool;
+    async fn flush(&self) -> Result<()>;
+    async fn close(&self) -> Result<()>;
 }
+// blanket impl for Arc<S: BlockStore>
 ```
 
-**Реализации**:
-- `SledBlockStore` — default (embedded)
-- `ParityDBStore` — high-perf blockchain-optimized
-- `MemoryBlockStore` — for testing
-- `S3BlockStore` — cloud storage (future)
+**Реализации** (adapters):
+- `SledBlockStore` — default, embedded B+ tree (blockstore.rs)
+- `ParityDbBlockStore` — SSD-optimized, blockchain-tuned (paritydb.rs)
+- `S3BlockStore` — cloud storage with multipart + semaphore (s3.rs)
+- `MemoryBlockStore` — for testing (memory.rs)
+- `StorageObjectStore` — versioned objects (object_store.rs)
 
 ---
 
