@@ -93,31 +93,31 @@ pub trait BlockStore: Send + Sync {
                │ (calls)
 ┌──────────────▼──────────────────────────┐
 │ Decorator 1: Corruption Repair          │
-│  • Verify CID on every read              │
-│  • Detect corrupted blocks               │
-│  • Auto-repair from replication          │
+│  • Verify CID on every read             │
+│  • Detect corrupted blocks              │
+│  • Auto-repair from replication         │
 └──────────────┬──────────────────────────┘
                │ (delegates)
 ┌──────────────▼──────────────────────────┐
-│ Decorator 2: LRU Cache Layer             │
-│  • Hot-path optimization (99% hits)      │
-│  • Configurable cache size (default 2GB) │
-│  • Async-safe concurrent access          │
+│ Decorator 2: LRU Cache Layer            │
+│  • Hot-path optimization (99% hits)     │
+│  • Configurable cache size (default 2GB)│
+│  • Async-safe concurrent access         │
 └──────────────┬──────────────────────────┘
                │ (delegates)
 ┌──────────────▼──────────────────────────┐
 │ Decorator 3: Tiering / Hot-Cold         │
-│  • Frequent → in-memory/SSD              │
-│  • Old/cold → slower storage             │
-│  • Transparent to upper layers           │
+│  • Frequent → in-memory/SSD             │
+│  • Old/cold → slower storage            │
+│  • Transparent to upper layers          │
 └──────────────┬──────────────────────────┘
                │ (delegates)
 ┌──────────────▼──────────────────────────┐
-│ Implementation: SledBlockStore           │
-│  • Embedded B+ tree database              │
-│  • ACID transactions                      │
-│  • RocksDB-style performance              │
-└──────────────────────────────────────────┘
+│ Implementation: SledBlockStore          │
+│  • Embedded B+ tree database            │
+│  • ACID transactions                    │
+│  • RocksDB-style performance            │
+└─────────────────────────────────────────┘
 ```
 
 **Преимущества**:

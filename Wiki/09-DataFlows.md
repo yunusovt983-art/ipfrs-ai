@@ -236,40 +236,40 @@ Knowledge Base (предварительно загруженная):
     - ancestor(X, Y) :- parent(X, Y)
     - ancestor(X, Z) :- parent(X, Y), ancestor(Y, Z)
 
-┌─ LOGIC (Backward chaining) ──────────────────┐
-│ Query: ancestor(alice, X)?                   │
-│                                              │
-│ Step 1: Try Rule 1: ancestor(A,B) :- parent(A,B) │
-│   ancestor(alice, X) matches with A=alice, B=X │
-│   Subgoal: parent(alice, X)?                │
-│   Check facts: parent(alice, bob) ✓         │
-│   Solution 1: ancestor(alice, bob) ✓        │
-│                                              │
+┌─ LOGIC (Backward chaining) ─────────────────────────────────────┐
+│ Query: ancestor(alice, X)?                                      │
+│                                                                 │
+│ Step 1: Try Rule 1: ancestor(A,B) :- parent(A,B)                │
+│   ancestor(alice, X) matches with A=alice, B=X                  │
+│   Subgoal: parent(alice, X)?                                    │
+│   Check facts: parent(alice, bob) ✓                             │
+│   Solution 1: ancestor(alice, bob) ✓                            │
+│                                                                 │
 │ Step 2: Try Rule 2: ancestor(A,Z) :- parent(A,Y), ancestor(Y,Z) │
-│   ancestor(alice, X) matches with A=alice, Z=X │
-│   Subgoal 1: parent(alice, Y)?              │
-│   Check facts: parent(alice, bob) ✓         │
-│   Y = bob                                    │
-│   Subgoal 2: ancestor(bob, X)?              │
-│                                              │
-│   Recurse on ancestor(bob, X):              │
-│     Try Rule 1: ancestor(bob, B) :- parent(bob, B) │
-│     parent(bob, X)? Check: parent(bob, charlie) ✓ │
-│     Solution: ancestor(bob, charlie) ✓      │
-│     Propagate: ancestor(alice, charlie) ✓   │
-│                                              │
-│     Try Rule 2: ancestor(bob, Z) :- parent(bob,Y2), ancestor(Y2,Z) │
-│     parent(bob, Y2)? Y2=charlie             │
-│     ancestor(charlie, X)?                   │
-│       Try Rule 1: parent(charlie, X)?       │
-│       parent(charlie, diana) ✓              │
-│       Solution: ancestor(charlie, diana) ✓  │
-│       Propagate: ancestor(bob, diana) ✓     │
-│       Propagate: ancestor(alice, diana) ✓   │
-│                                              │
-│ All solutions found!                         │
-│ Time: 1-5ms for typical queries             │
-└──────────────────────────────────────────────┘
+│   ancestor(alice, X) matches with A=alice, Z=X                  │
+│   Subgoal 1: parent(alice, Y)?                                  │
+│   Check facts: parent(alice, bob) ✓                             │
+│   Y = bob                                                       │
+│   Subgoal 2: ancestor(bob, X)?                                  │
+│                                                                 │
+│   Recurse on ancestor(bob, X):                                  │
+│     Try Rule 1: ancestor(bob, B) :- parent(bob, B)              │
+│     parent(bob, X)? Check: parent(bob, charlie) ✓               │
+│     Solution: ancestor(bob, charlie) ✓                          │
+│     Propagate: ancestor(alice, charlie) ✓                       │
+│                                                                 │
+│  Try Rule 2: ancestor(bob, Z) :- parent(bob,Y2), ancestor(Y2,Z) │
+│     parent(bob, Y2)? Y2=charlie                                 │
+│     ancestor(charlie, X)?                                       │
+│       Try Rule 1: parent(charlie, X)?                           │
+│       parent(charlie, diana) ✓                                  │
+│       Solution: ancestor(charlie, diana) ✓                      │
+│       Propagate: ancestor(bob, diana) ✓                         │
+│       Propagate: ancestor(alice, diana) ✓                       │
+│                                                                 │
+│ All solutions found!                                            │
+│ Time: 1-5ms for typical queries                                 │
+└─────────────────────────────────────────────────────────────────┘
     ↓
 User видит:
   [

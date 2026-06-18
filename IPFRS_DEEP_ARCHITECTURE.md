@@ -54,8 +54,8 @@ Traditional IPFS stores data. IPFRS stores **meaning** along with data through:
 ├──────────────────────────────────────────────────────┤
 │         PHYSICAL LAYER (The Body)                    │
 │  - Block Storage: Content-addressed blocks (CID)     │
-│  - Network Stack: libp2p + QUIC + DHT               │
-│  - Transport Protocols: Bitswap, TensorSwap         │
+│  - Network Stack: libp2p + QUIC + DHT                │
+│  - Transport Protocols: Bitswap, TensorSwap          │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -87,12 +87,12 @@ The unique insight: these layers are **not separate**—they work in concert:
 ┌────────────────────▼─────────────────────────────────────────────┐
 │ LAYER 2: Domain Layer (5 Bounded Contexts)                       │
 │                                                                  │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐              │
-│  │Storage Domain│ │Network Domain│ │Semantic Domain              │
-│  └──────────────┘ └──────────────┘ └──────────────┘              │
+│  ┌──────────────┐ ┌──────────────┐ ┌───────────────┐             │
+│  │Storage Domain│ │Network Domain│ │Semantic Domain│             │
+│  └──────────────┘ └──────────────┘ └───────────────┘             │
 │                                                                  │
 │  ┌──────────────┐ ┌──────────────────────────────┐               │
-│  │Logic Domain  │ │Transport Domain               │              │
+│  │Logic Domain  │ │Transport Domain              │               │
 │  └──────────────┘ └──────────────────────────────┘               │
 └────────────────────┬─────────────────────────────────────────────┘
                      │
@@ -561,11 +561,11 @@ ipfrs-transport/
 2. **Want List Management**:
    ```
    Want List (priority queue):
-   ┌─────────────────────────────┐
+   ┌──────────────────────────────────────┐
    │ CID1  priority=100 (needed first)    │
    │ CID2  priority=50  (needed second)   │
    │ CID3  priority=10  (can wait)        │
-   └─────────────────────────────┘
+   └──────────────────────────────────────┘
    
    Send to peer: "I want CID1 (priority 100), CID2 (50), CID3 (10)"
    Peer: Prioritizes CID1 in their response
@@ -575,7 +575,7 @@ ipfrs-transport/
    ```
    Client                           Peer
       │                              │
-      │ Want(CID1, prio=100)        │
+      │ Want(CID1, prio=100)         │
       ├─────────────────────────────>│
       │                              │ (checking storage)
       │                              │

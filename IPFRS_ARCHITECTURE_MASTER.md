@@ -63,18 +63,18 @@ crates/
                     │  Orchestrates all domains│
                     └───┬──────────┬───┬────┬──┘
                         │          │   │    │
-          ┌─────────────▼┐ ┌───────▼┐ │    │
-          │  STORAGE     │ │NETWORK │ │    │
-          │   Domain     │ │ Domain │ │    │
-          └──────┬───────┘ └────┬───┘ │    │
-                 │             │     │    │
-                 │         ┌───┴─────▼────▼─────────┐
-                 │         │ TRANSPORT Domain       │
-                 │         │ (uses Storage+Network) │
-                 │         └──────────┬─────────────┘
+          ┌─────────────▼┐ ┌───────▼┐  │    │
+          │  STORAGE     │ │NETWORK │  │    │
+          │   Domain     │ │ Domain │  │    │
+          └──────┬───────┘ └─────┬──┘  │    │
+                 │               │     │    │
+                 │         ┌─────┴─────▼────▼─────────┐
+                 │         │ TRANSPORT Domain         │
+                 │         │ (uses Storage+Network)   │
+                 │         └──────────┬───────────────┘
                  │                    │
                  ▼                    ▼
-          ┌─────────────┴──────────────────────┐
+          ┌──────┴─────────────────────────────┐
           │ SEMANTIC Domain │ LOGIC Domain     │
           │ (HNSW)          │ (TensorLogic)    │
           └──────────────┬──────────────────┬──┘
@@ -260,27 +260,27 @@ pub trait BlockStore: Send + Sync {
                │ (calls)
 ┌──────────────▼─────────────────────────┐
 │ Decorator: CorruptionRepair            │
-│  • Verify CID on read                   │
+│  • Verify CID on read                  │
 │  • Detect & repair corrupted blocks    │
-└──────────────┬──────────────────────────┘
+└──────────────┬─────────────────────────┘
                │ (delegates)
 ┌──────────────▼─────────────────────────┐
-│ Decorator: LRU Cache Layer              │
-│  • Hot-path optimization (99% hits)     │
+│ Decorator: LRU Cache Layer             │
+│  • Hot-path optimization (99% hits)    │
 │  • Async-safe concurrent access        │
-└──────────────┬──────────────────────────┘
+└──────────────┬─────────────────────────┘
                │ (delegates)
 ┌──────────────▼─────────────────────────┐
 │ Decorator: Tiering / Hot-Cold Split    │
 │  • Frequently used → in-memory/SSD     │
 │  • Old/cold → cold storage             │
-└──────────────┬──────────────────────────┘
+└──────────────┬─────────────────────────┘
                │ (delegates)
 ┌──────────────▼─────────────────────────┐
-│ Implementation: SledBlockStore          │
-│  • Embedded B+ tree database             │
-│  • ACID transactions                     │
-└─────────────────────────────────────────┘
+│ Implementation: SledBlockStore         │
+│  • Embedded B+ tree database           │
+│  • ACID transactions                   │
+└────────────────────────────────────────┘
 ```
 
 **Why decorators?**

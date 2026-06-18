@@ -167,12 +167,12 @@ impl TransportScore {
 ┌────────▼──────────────────┐
 │ Peer A (us)               │
 │ Receives Block(CID1)      │
-│ Verify: hash(data)==CID1 ✓
+│ Verify: hash(data)==CID1 ✓│
 │ Storage.put(block)        │
 │ Update peer reputation    │
 │ Remove CID1 from want_list│
 │ Send next: CID2           │
-└────────┬─────────────────┘
+└────────┬──────────────────┘
          │
          ... repeat until all blocks received or timeout
 ```
