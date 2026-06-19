@@ -233,6 +233,19 @@ Indexes (read):  TermIndexBuilder, TensorRuleIndex, RuleDependencyGraph
 
 ## 2. Tensor Memory Management
 
+> **🔬 Глубокое погружение по коду (2026-06-19).** Точные `file:line`-якоря и
+> исправление расхождений в именах/алгоритмах. Подробные подсекции 2.1–2.6 ниже верны
+> по структуре; здесь — выверенные уточнения.
+
+| Компонент | Реальный тип | Якорь struct / главный метод | Уточнение |
+|-----------|--------------|------------------------------|-----------|
+| Arena | `TensorArena` | `tensor_arena.rs:256` / `allocate:286`, `reset_all:316` | bump-аллокатор, выравнивание фиксированное **8 байт** (`ARENA_ALIGN`); одиночный аллокат больше региона обрабатывается (новый регион `max(region_size, size)`) |
+| Pool | `TensorPool` | `tensor_pool.rs:286` / `acquire:325`, `release:368` | **8 size-классов** степени двойки 256 B → 32 MiB; `max_per_bucket` деф. **16**; LIFO-переиспользование; **нет Drop-guard** — `release` вызывает пользователь |
+| GC | ⚠️ `TensorGarbageCollector` (**не** `TensorGC`) | `tensor_gc.rs:122` / `collect:235`, `reachable_set:194` | 3 фазы mark-and-sweep (MarkRoots→Trace(BFS по `dependencies`)→Sweep); спасают `pinned` и `ref_count>0`; **триггер только ручной** `collect()`; `GcPhase` объявлен, но логикой не управляет |
+| Quantizer | `TensorQuantizer` | `tensor_quantizer.rs:349` / `quantize:377`, `dequantize:550` | `QuantizationMode`: Int8Symmetric/Int8Asymmetric/Int4/Fp16/Bf16; per-channel + percentile (деф. 99.9); FP16/BF16 — симуляция округлением/обрезкой битов; **реальная реализация** |
+| Diff | `TensorDiffEngine` | `tensor_diff.rs:133` / `diff_tensors:150` | change-detection для FL: `DiffKind` = Added/Removed/ShapeChanged/ValueChanged{max_abs,mean_abs,changed}/Unchanged; только **метрики**, без дельта-кодирования весов |
+| Checksum | `TensorChecksumEngine` | `tensor_checksum.rs:314` / `compute:343`, `verify:375` | ⚠️ 4 алгоритма = **FNV-1a64 / Adler-32 / Fletcher-16 / XorFold** (НЕ CRC32/xxHash); `verify` ловит и несовпадение суммы, и изменение длины |
+
 ### 2.1 TensorArena — Bump Allocator
 
 **Файл**: `tensor_arena.rs` (~300 LOC)
@@ -567,6 +580,32 @@ pub struct ChecksumEngineStats {
 ---
 
 ## 3. Tensor Execution
+
+> **🔬 Глубокое погружение по коду (2026-06-19).** Выверенные `file:line` и важные
+> уточнения по исполнению и автодифференцированию.
+
+**Ключевые факты, проверенные по коду:**
+- **`TensorOp` содержит ровно 34 варианта** (`computation_graph.rs:46`) — «30+» формально
+  верно. Категории: источники (Input/Constant); арифметика (MatMul/Add/Mul/Sub/Div/Einsum);
+  форма (Reshape/Transpose/Concat/Split/Gather/Scatter/Slice/Pad); редукции (ReduceSum/ReduceMean);
+  активации (ReLU/Tanh/Sigmoid/GELU/Softmax); норм./рег. (LayerNorm/BatchNorm/Dropout);
+  элементарные (Exp/Log/Pow/Sqrt); **fused** (FusedLinear/FusedAddReLU/FusedBatchNormReLU/FusedLayerNormDropout).
+- ⚠️ **В самом `ComputationGraph` нет численного `execute`/`forward`** — это символьное
+  представление DAG (`computation_graph.rs:512`). Реальное исполнение даёт
+  `ParallelExecutor::execute` (`:1240`), `StreamExecutor`, `DistributedExecutor` (последний —
+  заглушка, `:1667`, см. `[[../Wiki/11-RealityCheck]]`).
+- **`GraphOptimizer`** — unit-struct со статическими проходами: `constant_folding` (`:836`),
+  `fusion` (`:866`), `remove_dead_nodes`/DCE (`:1056`), `optimize_all` (`:1066`, итеративно до
+  10 проходов); CSE — метод графа `optimize_cse` (`:671`).
+- ⚠️ **`AutogradGraph` — СКАЛЯРНЫЙ (f64), не тензорного уровня** (`autograd.rs:52`); 7 операций
+  `AutogradOp` (Input/Add/Mul/Neg/Exp/Ln/Pow). Он **оторван** от `ComputationGraph` (у того нет
+  backward) — градиенты для тензоров считаются рукописными per-layer методами.
+- ⚠️ **Два независимых механизма fusion**: (а) `GraphOptimizer::fusion` сворачивает
+  `TensorOp::Fused*`; (б) отдельный `TensorOpFusion` (`op_fusion.rs:111`) с **3** своими
+  паттернами (`ScaleBias`, `ScaleReluBias`, `ClampNormalize`).
+- ⚠️ **`OpDispatcher` → реальный тип `TensorOpDispatcher`** (`op_dispatcher.rs:164`), enum
+  `BackendKind { Cpu, Gpu, Remote, Simulated }`. Это **чистый маршрутизатор**: GPU/Remote —
+  заглушки уровня выбора бэкенда, **реального CUDA/сетевого исполнения нет** (`dispatch:200`).
 
 ### 3.1 ComputationGraph — DAG Execution
 
