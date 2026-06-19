@@ -745,61 +745,106 @@ pub trait BackendExecutor {
 
 ---
 
-## 4. Gradient System
+## 4. Gradient System (Federated Learning)
 
-### 4.1 Gradient Types
+> **Переписано 2026-06-19, выверено по коду.** Раньше секция показывала упрощённые
+> и неточные сигнатуры. На деле это **целый модуль `gradient/` из 8 файлов** +
+> top-level `gradient_sparsify.rs`. Ниже — реальные типы и инфраструктура FL.
 
-**Файл**: `gradient/mod.rs` (~500 LOC)
+### 4.0 Структура модуля `gradient/`
+
+| Файл | Содержимое |
+|------|------------|
+| `gradient/tensor.rs` | типы градиентов: `SparseGradient`, `QuantizedGradient`, `LayerGradient` |
+| `gradient/backward_pass.rs` | `federated_average`, `clip_gradient_norm`, `AggregationMethod`, `BackwardPassCoordinator` |
+| `gradient/federated.rs` | DP, secure aggregation, раунды FL, `DistributedGradientAccumulator`, `GossipModelSync` |
+| `gradient/coordination.rs` | `BackwardPassId`, `GradientContribution`, Arrow-блоки |
+| `gradient/arrow_ipc.rs` | сериализация градиентов в Arrow IPC (контент-адресуемые блоки) |
+| `gradient/checkpoint.rs` | `GradientCheckpoint` |
+| `gradient/computation_graph.rs` | `ComputationGraphStore` для градиентов |
+| `gradient_sparsify.rs` (top-level) | `GradientDelta` + encode/decode_delta |
+
+### 4.1 Типы градиентов — `gradient/tensor.rs`
 
 ```rust
+// gradient/tensor.rs:23 — разрежённый градиент (CSR-подобный)
 pub struct SparseGradient {
-    pub indices: Vec<usize>,
-    pub values: Vec<f32>,
+    pub indices: Vec<usize>,   // индексы ненулевых элементов (flattened)
+    pub values: Vec<f32>,      // ненулевые значения
     pub shape: Vec<usize>,
+    pub metadata: TensorMetadata,
 }
-
+// gradient/tensor.rs:111 — int8-квантованный (НЕ data/zero_point, как было в черновике)
 pub struct QuantizedGradient {
-    pub data: Vec<i8>,
+    pub quantized_values: Vec<i8>,
     pub scale: f32,
-    pub zero_point: i32,
+    pub min_val: f32,          // минимум для деквантизации
     pub shape: Vec<usize>,
+    pub metadata: TensorMetadata,
 }
-
-pub struct GradientDelta {
-    pub base_version: u64,
-    pub deltas: Vec<GradientDeltaEntry>,
+// gradient/tensor.rs:199 — унифицирующий enum слоя
+pub enum LayerGradient {
+    Dense { values: Vec<f32>, shape: Vec<usize> },
+    Sparse(SparseGradient),
+    Quantized(QuantizedGradient),
 }
-
-pub struct GradientDeltaEntry {
-    pub param_name: String,
-    pub indices: Vec<usize>,
-    pub values: Vec<f32>,
-}
+// gradient_sparsify.rs:267 — дельта относительно прошлого раунда
+pub struct GradientDelta { /* base + sparsified diff */ }   // encode_delta:344 / decode_delta:395
 ```
 
-### 4.2 Differential Privacy
+### 4.2 Агрегация — `gradient/backward_pass.rs`
 
 ```rust
-pub struct DifferentialPrivacy {
-    pub mechanism: DpMechanism,
-    pub epsilon: f64,
-    pub delta: f64,
-}
-
-pub enum DpMechanism {
-    Gaussian { sigma: f64 },
-    Laplace { scale: f64 },
-}
+// :19 — невзвешенное среднее (FedAvg), проверяет пустоту и совпадение размерности
+pub fn federated_average(gradients: &[Vec<f32>]) -> Result<Vec<f32>, GradientError>;
+// :40 — обрезка L2-нормы (gradient clipping) на месте
+pub fn clip_gradient_norm(gradient: &mut [f32], max_norm: f32);
+// :172 — стратегии агрегации
+pub enum AggregationMethod { Sum, Mean, WeightedMean { weights: Vec<f32> }, FedAvg }
 ```
+`BackwardPassCoordinator::aggregate_gradients` (`:302`) диспетчеризует по
+`AggregationMethod`; ветка `Mean | FedAvg` зовёт `federated_average` (`:328`).
+**Инвариант (I8-совместимо):** пустой набор → `EmptyGradients`, рваные размерности →
+`DimensionMismatch` (`:20-26`).
 
-### 4.3 Secure Aggregation
+### 4.3 Дифференциальная приватность — `gradient/federated.rs`
 
 ```rust
-pub struct SecureAggregation {
-    pub secret_shares: Vec<Vec<u8>>,
-    pub public_keys: HashMap<PeerId, Vec<u8>>,
+pub struct PrivacyBudget {                  // federated.rs:40
+    pub epsilon: f64, pub delta: f64, pub remaining_epsilon: f64,   // бюджет тратится, не возвращается
 }
+pub enum DPMechanism { Gaussian, Laplacian }   // federated.rs:87
+pub struct DifferentialPrivacy {            // federated.rs:97
+    budget: PrivacyBudget, sensitivity: f64, mechanism: DPMechanism,
+}
+// new(epsilon, delta, sensitivity, mechanism) — federated.rs:113
 ```
+Добавляет шум (Gauss/Laplace) к градиентам в пределах `sensitivity` (L2-граница),
+расходуя `remaining_epsilon`. Композиция бюджета — монотонна (ε только убывает).
+
+### 4.4 Secure Aggregation — `gradient/federated.rs:299`
+
+```rust
+pub struct SecureAggregation { min_participants: usize, participant_count: usize }
+pub fn aggregate_secure(&self, gradients: &[Vec<f32>]) -> Result<Vec<f32>, GradientError>; // :328
+```
+Агрегирует только при достижении порога участников (`min_participants`) — защита от
+деанонимизации малого круга.
+
+### 4.5 Инфраструктура раундов FL — `gradient/federated.rs`
+
+| Тип | Назначение | Источник |
+|-----|------------|----------|
+| `FederatedRound { round_num, client_count, global_model: Cid, aggregated_gradient }` | один раунд FL; модель адресуется по CID | `federated.rs:438` |
+| `FederatedRound::aggregate(dp: Option<&DifferentialPrivacy>)` | агрегация раунда с опц. DP | `federated.rs:545` |
+| `DistributedGradientAccumulator { local_gradient, peer_gradients, config }` | сбор градиентов пиров; `commit_local` → `aggregate()` | `federated.rs:1054,1125` |
+| `GossipModelSync` | сбор `ModelUpdate` по CID через broadcast-канал с дедлайном | `federated.rs:945` |
+| `ConvergenceDetector` | детект сходимости FL | `federated.rs:630` |
+| `ModelSyncProtocol` / `ModelUpdate` | синхронизация модели между узлами | `federated.rs:791,908` |
+
+> ⚠️ **Заглушка/риск (см. `[[../Wiki/11-RealityCheck]]`):** `GossipModelSync::collect_updates`
+> прерывается **по таймауту**, возвращая что собралось (`federated.rs:~1014`) — `aggregate()`
+> может молча усреднить по меньшему кругу пиров (тихая частичная агрегация, не зависание).
 
 ---
 
@@ -1084,30 +1129,78 @@ pub fn fit(&mut self, samples: &[DtlSample]) -> Result<(), DtlError>;
 
 ## 6. Proof System
 
-### 6.1 ProofTree
+> **Переписано 2026-06-19, выверено по коду.** Реальные структуры (`proof_tree.rs`,
+> `proof_cache.rs`, `provenance.rs`) отличаются от прежнего черновика: `ProofNode`
+> рекурсивен (содержит `Vec<ProofNode>`, не `Vec<ProofNodeId>`); дерево хранит привязки
+> переменных и аннотации пиров; кэширование версионировано по KB.
 
-**Файл**: `proof_tree.rs` (~400 LOC)
+### 6.1 ProofTree / ProofNode — `proof_tree.rs`
 
 ```rust
-pub struct ProofTree {
-    pub goal: Predicate,
-    pub rule: Option<Rule>,
-    pub subproofs: Vec<ProofTree>,
-    pub attribution: Option<PeerAttribution>,
-}
-
+// proof_tree.rs:46 — узел доказательства (рекурсивный)
 pub struct ProofNode {
-    pub id: ProofNodeId,
-    pub goal: Predicate,
-    pub rule_cid: Option<Cid>,
-    pub children: Vec<ProofNodeId>,
+    pub goal: Term,                  // что доказывается
+    pub rule_cid: Option<Cid>,       // CID применённого правила (None = базовый факт)
+    pub peer: Option<String>,        // кто разрешил цель (None = локально)
+    pub children: Vec<ProofNode>,    // под-цели тела правила (РЕКУРСИЯ, не ID)
+    pub resolved: bool,              // полностью ли разрешён узел и его потомки
+    pub depth: usize,                // глубина (корень = 0)
 }
-
-pub struct ProofCache {
-    cache: LruCache<Predicate, ProofTree>,
-    max_size: usize,
+// proof_tree.rs:199
+pub struct ProofTree {
+    pub root: ProofNode,
+    pub query: Term,                       // исходный запрос
+    pub bindings: HashMap<String, Term>,   // итоговые привязки переменных
+    pub is_complete: bool,                 // все ли узлы resolved
 }
 ```
+
+**Ключевые операции `ProofTree`:**
+| Метод | Назначение | Источник |
+|-------|------------|----------|
+| `size()` / `max_depth()` | размер/глубина дерева | `proof_tree.rs:237,242` |
+| `contributing_peers()` | список пиров, участвовавших в доказательстве | `:247` |
+| `prune_unresolved()` | удалить неразрешённые ветви | `:261` |
+| `collapse_chains()` | схлопнуть линейные цепочки (упрощение) | `:271` |
+| `remote_contributions()` | узлы, разрешённые удалёнными пирами (+ адрес) | `:282` |
+| `merge(other)` | слить дерево от другого пира (распределённый вывод) | `:294` |
+| `to_stream(...)` | потоковая сериализация | `:310` |
+
+> Конструкторы узлов: `ProofNode::fact(goal, depth, peer)` (`:81`) — разрешённый лист;
+> `unresolved(goal, depth)` (`:93`); `from_rule(...)` (`:112`). `ProofTree::failed(query)`
+> (`:226`) — дерево неудачного поиска. Это и есть основа **объяснимости (XAI)**:
+> атрибуция пиров + CID правил даёт полную трассу вывода.
+
+### 6.2 Кэширование доказательств — `proof_cache.rs`
+
+```rust
+pub struct ProofCacheKey { goal_hash: u64, kb_version: u64 }   // proof_cache.rs:54
+pub struct CachedProof { /* proof + время */ }                 // :85
+pub fn is_stale(&self, ttl_secs: u64, now_secs: u64) -> bool;  // :106 — TTL-протухание
+pub struct ProofCachingLayer { /* config + store + stats */ }  // :184
+pub fn lookup(&mut self, key: &ProofCacheKey, now_secs: u64) -> Option<&CachedProof>; // :211
+```
+Кэш **версионирован по KB**: ключ = `(fnv1a(goal), kb_version)` (`:36,54`) — при
+изменении базы знаний старые доказательства автоматически инвалидируются.
+`ProofCacheStats::hit_rate()` (`:164`) считает эффективность кэша.
+
+### 6.3 Provenance (происхождение и лицензии) — `provenance.rs`
+
+```rust
+pub enum License {                                   // provenance.rs:32
+    MIT, Apache2, GPLv3, BSD3Clause, CCBY, CCBYSA, Proprietary, Custom(String), Unknown,
+}
+pub struct Attribution { /* name, role, contact, organization */ }   // :71
+pub struct DatasetProvenance { dataset_cid: Cid, name, version, license, /* attributions, sources */ } // :111
+pub struct TrainingProvenance { model_cid: Cid, training_datasets: Vec<Cid>, license, /* hyperparams */ } // :239
+pub struct Hyperparameters { /* lr, batch_size, epochs, optimizer, custom */ } // :175
+```
+Полная цепочка происхождения для **воспроизводимого и объяснимого ML**: какие
+датасеты (по CID) и гиперпараметры породили модель (по CID), под какой лицензией, с
+чьей атрибуцией. Связывает Logic Context со слоем доверия/комплаенса.
+
+> ⚠️ `License` здесь — **доменный тип для трекинга лицензий контента**, не лицензия
+> самого проекта IPFRS (она AGPL-3.0). `License::Apache2` — просто значение enum.
 
 ---
 
