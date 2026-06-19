@@ -64,6 +64,67 @@ Transport Context отвечает за **reliable block exchange protocol coord
 
 ---
 
+## 1bis. Глубокое погружение по коду (выверено 2026-06-19)
+
+> Точные `file:line`-якоря и исправление расхождений по реальному коду
+> `ipfrs-transport`. Подсекции 2–13 ниже остаются концептуальными.
+
+### 1bis.1 Что реально работает, а что заглушка
+
+| Подсистема | Статус | Источник |
+|------------|--------|----------|
+| `Session` + `SessionManager` (жизненный цикл, события) | ✅ работает | `session.rs:199,463` |
+| Bitswap want/have/block, приоритеты, выбор пиров | ✅ работает | `bitswap.rs:75,106,184` |
+| **TensorSwap** (стриминг, einsum-граф, safetensors, градиенты) | ✅ самый завершённый | `tensorswap/core.rs:57` |
+| Prefetch / request coalescing | ✅ работает | `request_coalescing.rs:99` |
+| **GraphSync DAG-обход** | ⚠️ заглушка: `extract_links` → `Ok(Vec::new())`, обходит только корень | `graphsync.rs:377` |
+| **Erasure (Reed-Solomon)** | ⚠️ заглушка: decode → `DecodingFailed`; encode — взвешенный XOR | `erasure.rs:299` |
+| **NAT traversal (STUN/TURN/ICE)** | ⚠️ симуляция: dummy-адреса, «успех» захардкожен | `nat_traversal.rs:367` |
+| `MultiTransportManager::find_transport` | ⚠️ баг: fallback не выбирает непредпочтённый транспорт | `multi_transport.rs:215` |
+
+### 1bis.2 Session — корректировки
+
+```rust
+pub struct Session {                          // session.rs:199
+    id: SessionId,                            // = u64
+    state: Arc<RwLock<SessionState>>,
+    blocks: Arc<DashMap<Cid, BlockRequest>>,  // приватная внутренняя сущность
+    stats, state_tx/rx: watch::*,             // реактивный сигнал завершения
+}
+```
+- `BlockRequest` — **приватная** внутренняя сущность (граница агрегата соблюдена); мутации только
+  через методы `Session` (`add_block`/`mark_received`/`mark_failed`).
+- **Инвариант завершения**: сессия завершена ⟺ `recv + failed ≥ total` (`session.rs:151`); переход
+  состояния делается **вне stats-lock** (`session.rs:323`) — осознанное избегание дедлока.
+- ⚠️ Состояние `SessionState::Completing` **объявлено, но никогда не присваивается** (мёртвое).
+
+### 1bis.3 Два Bitswap (ключевое расхождение)
+
+⚠️ **Bitswap реализован дважды и несовместимо**:
+| | `ipfrs-transport/bitswap.rs` | `ipfrs-network/bitswap.rs` |
+|---|---|---|
+| Тип | `BitswapExchange<S>` (`:75`) | `Bitswap` (`:15`) |
+| Want-list | приоритетная куча + дедуп | неупорядоченный `HashSet<Cid>` |
+| PeerId | `String` (`peer_manager.rs:40`) | `libp2p::PeerId` |
+| Зрелость | богатое планирование | минимальный каркас |
+
+Это **параллельные реализации**, не два слоя одного дизайна; ни один не импортирует другой.
+
+- ⚠️ В transport-Bitswap **нет различия want-have vs want-block** и **нет сообщения `WantHave`**;
+  присутствие узнаётся лишь из входящих `Have`/`DontHave`.
+- ⚠️ `PeerLedger`/«fair-leeching» (из старых диаграмм) **не существуют**.
+
+### 1bis.4 Приоритеты want-list и backpressure
+
+- Полосы приоритета `Low=0/Normal=50/High=100/Urgent=200/Critical=300` (`want_list.rs:70`);
+  `effective_priority` поднимает по близости дедлайна (`:170`); куча: приоритет ↓, затем
+  `created_at` ↑ → **FIFO внутри полосы**; backoff = `base·2^min(retry,10)` + 10% jitter (`:437`).
+- ⚠️ «Баг backpressure-семафора» из старых заметок — **не здесь**: семафорный backpressure живёт в
+  `ipfrs-interface/src/backpressure.rs` и (по коду+тестам) **корректен**. У transport свой
+  watermark-счётчик (`tensorswap/streaming.rs:328`), без семафора. Полный реестр: `[[../Wiki/11-RealityCheck]]`.
+
+---
+
 ## 2. Session Aggregate
 
 ### 2.1 State Machine

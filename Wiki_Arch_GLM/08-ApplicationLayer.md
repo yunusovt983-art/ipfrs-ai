@@ -35,6 +35,61 @@
 
 ---
 
+## 1bis. Глубокое погружение по коду (выверено 2026-06-19)
+
+> Точные `file:line`-якоря и три проверки безопасности по реальному коду `ipfrs`
+> (Application) и `ipfrs-interface` (Gateway). Подсекции 2–9 ниже — концептуальные.
+
+### 1bis.1 Node как Facade (композиционный корень)
+
+```rust
+// ipfrs/src/node/mod.rs:34 (сокращено)
+pub struct Node {
+    network: Option<NetworkNode>,                          // Network
+    storage: Option<Arc<NodeStore>>,                       // Storage (= CachedBlockStore<SledBlockStore>)
+    semantic: OnceCell<Arc<SemanticRouter>>,              // Semantic (лениво)
+    tensorlogic: OnceCell<Arc<TensorLogicStore<NodeStore>>>, // TensorLogic (лениво)
+    auth_manager, tls_manager, pin_manager, metrics,       // cross-cutting
+}
+```
+Фасад разбит на **op-модули** (по одному `impl Node` на заботу): `block_ops`, `dag_ops`,
+`pin_ops`, `semantic_ops`, `tensorlogic_ops` (1290 строк), `network_ops`, `repo_ops`, `auth_ops`.
+Semantic/TensorLogic поднимаются **лениво** через `OnceCell::get_or_try_init` (`mod.rs:69`).
+Эталон оркестрации — `Node::get` (`block_ops.rs:127`): cache → store → DHT `find_providers` →
+fetch у пира → backfill (см. поток GET в `[[../Wiki/10-DataFlows]]`).
+
+### 1bis.2 Три проверки безопасности (по факту кода)
+
+| Пункт | Вердикт | Источник |
+|-------|---------|----------|
+| **JWT-подпись** | ✅ **реальный HMAC-HS256, НЕ MD5** (через `jsonwebtoken`, `Algorithm::HS256`) | `ipfrs/src/auth.rs:461`, `ipfrs-interface/src/auth.rs:278` |
+| **TLS-сертификаты** | ⚠️ **заглушка в node-крейте**: `SelfSignedCertGenerator::generate()` пишет фейковый PEM, rcgen только в комментарии. Gateway-TLS через rustls (`from_pem_file`) — **реальный** | `ipfrs/src/tls.rs:314` vs `ipfrs-interface/src/tls.rs:49` |
+| **Backpressure-семафор** | ✅ **корректен**: forget permits при сжатии окна (eager + deferred RAII drop), покрыт тестами | `ipfrs-interface/src/backpressure.rs:185` |
+
+### 1bis.3 Опубликованные API (Gateway)
+
+| Протокол | Точка входа | Источник |
+|----------|-------------|----------|
+| HTTP-gateway (Axum) | `Gateway::router()`, `/ipfs/{cid}`, Kubo v0, v1-stream | `gateway/mod.rs:283` |
+| gRPC (Tonic, feature) | Block/Dag/File/Tensor + `GradientSyncService` | `grpc.rs:247,1384` |
+| GraphQL | Query: block/semantic_search/infer/prove; Mutation: add_block/index_content/add_fact | `graphql.rs:82,276` |
+| WebSocket pub/sub | топик→`broadcast::Sender<RealtimeEvent>` | `websocket.rs:112` |
+
+### 1bis.4 Инварианты и остаточные риски
+
+- **Pin-safety vs GC** (центральный инвариант): mark засевает достижимое из `PinManager::list()`
+  (`gc.rs:134`), sweep пропускает достижимое (`gc.rs:100`). ⚠️ Но `GcConfig.min_age_seconds`
+  **объявлен и не enforced** в цикле (`gc.rs`); ⚠️ indirect-пины **не персистятся** между
+  рестартами (`pin.rs`).
+- ⚠️ **Дублированная Auth-модель**: два разных enum `Role`/`Permission`/`User` в `ipfrs` и
+  `ipfrs-interface` — риск расхождения авторизации.
+- ⚠️ Дефолтный секрет `"default_secret_change_in_production"` (`auth.rs:574`); in-memory
+  `UserStore`/`ApiKeyStore`; `ShutdownCoordinator::wait_internal` — `sleep(100ms)` placeholder
+  (`shutdown.rs:103`); часть `network_ops` (`bitswap_stats`, `ping`, `find_peer`) — заглушки.
+  Полный реестр: `[[../Wiki/11-RealityCheck]]`.
+
+---
+
 ## 2. Node Orchestrator
 
 ### 2.1 Structure
