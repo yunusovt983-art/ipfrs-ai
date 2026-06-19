@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/ipfrs-banner.png" alt="IPFRS — Planetary-Scale Distributed Brain for AI" width="100%">
+  <img src="assets/ipfrs-banner.jpg" alt="IPFRS — Planetary-Scale Distributed Brain for AI" width="100%">
 </p>
 
 # IPFRS — Inter-Planetary File Rust System
