@@ -810,7 +810,7 @@ mod tests {
             serde_json::from_str(pkg_json).expect("pkg/package.json must be valid JSON");
         assert_eq!(parsed["name"], "@cool-japan/ipfrs");
         assert_eq!(parsed["version"], "0.2.0");
-        assert_eq!(parsed["license"], "Apache-2.0");
+        assert_eq!(parsed["license"], "AGPL-3.0");
         // Verify required file entries are present
         let files = parsed["files"].as_array().expect("files must be an array");
         let file_names: Vec<&str> = files.iter().filter_map(|v| v.as_str()).collect();

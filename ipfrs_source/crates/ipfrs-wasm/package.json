@@ -16,7 +16,7 @@
     "./index.js",
     "./snippets/*"
   ],
-  "license": "MIT OR Apache-2.0",
+  "license": "AGPL-3.0",
   "keywords": [
     "ipfs",
     "content-addressed",

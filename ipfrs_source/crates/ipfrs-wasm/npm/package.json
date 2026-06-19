@@ -10,7 +10,7 @@
   },
   "keywords": ["ipfs", "wasm", "p2p", "content-addressing", "distributed"],
   "author": "COOLJAPAN OU (Team Kitasan)",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0",
   "files": ["dist/", "index.js", "index.d.ts"],
   "repository": {
     "type": "git",

@@ -13,7 +13,7 @@
   ],
   "keywords": ["ipfs", "ipld", "wasm", "rust", "content-addressed", "p2p"],
   "author": "COOLJAPAN OU (Team Kitasan)",
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cool-japan/ipfrs"
