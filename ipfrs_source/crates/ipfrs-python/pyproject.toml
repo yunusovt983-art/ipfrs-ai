@@ -8,7 +8,7 @@ version = "0.2.0"
 description = "Inter-Planetary File Rust System - Content-addressed storage with semantic search and logic programming"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "Apache-2.0"}
+license = {text = "AGPL-3.0"}
 authors = [
     {name = "IPFRS Contributors"}
 ]
@@ -16,7 +16,7 @@ keywords = ["ipfs", "content-addressed", "semantic-search", "logic-programming",
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
