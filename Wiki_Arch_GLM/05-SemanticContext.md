@@ -53,6 +53,85 @@ Semantic Context отвечает за **vector similarity search** и **embeddi
 
 ---
 
+## 1bis. Глубокое погружение по коду (выверено 2026-06-19)
+
+> Точные `file:line`-якоря и **исправление расхождений** между идеализированной моделью
+> и реальным кодом (19 пунктов, проверено по исходникам). Подсекции 2–13 ниже остаются
+> как концептуальное описание; здесь — выверенные факты.
+
+### 1bis.1 VectorIndex (HNSW) — ключевые факты
+
+```rust
+// hnsw.rs:84 — реальные поля
+pub struct VectorIndex {
+    index: Arc<RwLock<Hnsw<'static, f32, DistL2>>>,   // ВСЕГДА DistL2 (hnsw.rs:86)
+    id_to_cid, cid_to_id, vectors: HashMap<Cid, Vec<f32>>,  // оригиналы хранятся
+    dimension, metric, tracker,
+}
+```
+- ⚠️ **Алгоритм HNSW НЕ реализован в репозитории** — делегирован крейту **`hnsw_rs`**
+  (`hnsw.rs:6`); бэкенд жёстко на `DistL2`. Cosine/DotProduct **эмулируются** нормализацией
+  входа + пересчётом результата.
+- **`convert_distance`** (`hnsw.rs:399`), реальные формулы: `L2 → distance`;
+  `Cosine → 1 - distance²/2`; `DotProduct → -distance`. (В прежнем тексте формулы были иные.)
+- Нормализация (`hnsw.rs:379`): только **Cosine** нормирует к единичной длине; **DotProduct
+  НЕ нормализуется** (вопреки распространённому ожиданию).
+- **insert**: повторная вставка существующего CID → **ошибка** `Error::InvalidInput`
+  (`hnsw.rs:168`), НЕ no-op.
+- **delete** (`hnsw.rs:275`): **soft-delete** — узел остаётся в графе `hnsw_rs`, чистятся
+  только маппинги (накапливается фрагментация).
+- ⚠️ **`rebuild` (`hnsw.rs:570`) — БАГ**: ставит пустой `Hnsw`, **не переинициализирует
+  векторы** (`vectors_reinserted: 0`, `hnsw.rs:615`) → граф опустошается, поиск перестаёт
+  находить, хотя `len()` (по `cid_to_id`) врёт.
+- ⚠️ **snapshot/from_snapshot не сохраняют топологию** HNSW (`layer_connections: Vec::new()`,
+  `max_layer: 0`, `hnsw.rs:791,801`); `from_snapshot` пересобирает граф пере-вставкой.
+- `with_defaults` (`hnsw.rs:149`): M=16, ef_construction=200, **метрика L2** (не cosine).
+
+### 1bis.2 DiskANNIndex — ключевые факты (`diskann.rs`)
+
+```rust
+pub struct DiskANNConfig { dimension:768, max_degree:64(R), queue_size:100(L), alpha:1.2, num_entry_points:4 } // :22
+```
+- Vamana реализован **сам** (`vamana_insert:593`, `robust_prune:631`). Условие отбраковки
+  (`diskann.rs:670`): кандидат отбрасывается при `alpha * dist(cand, selected) < dist(cand, node)`.
+- ⚠️ **Хранит raw f32 через mmap, БЕЗ PQ и кодбука**; adjacency-граф `Vec<Vec<usize>>` —
+  **в RAM** (`diskann.rs:201`). «Константная память» — лишь частично (векторы пагинируются,
+  граф нет).
+- Расстояние — **свой скалярный `l2_distance`** (`diskann.rs:689`), **без SIMD**.
+- ⚠️ **`compact` (`diskann.rs:936`) — no-op** (`bytes_saved: 0`); зато `prune_graph:965` реален.
+
+### 1bis.3 Value Objects — корректировки
+
+- **`DistanceMetric`** (`hnsw.rs:15`) = `{ L2, Cosine, DotProduct }`. ⚠️ **`Jaccard` отсутствует**
+  (он только в несвязанном `text_similarity_scorer::SimilarityMetric`).
+- ⚠️ **Product Quantization есть, но НЕ подключён к индексам.** Две независимые реализации:
+  `vector_quantizer::VectorQuantizer` (f64, `Codebook`/`QuantizerCode`, `num_subspaces=8`,
+  `codes_per_subspace=255`) и `quantization::ProductQuantizer` (f32, `num_centroids=1<<bits`).
+  Обе **standalone**. В индексный путь встроен только **скалярный INT8** (`router.rs`), не PQ.
+
+### 1bis.4 Domain Services — корректировки
+
+| Сервис (в обзоре) | Реальность | Источник |
+|-------------------|------------|----------|
+| EmbeddingPipeline | FNV-фолд только для `RawBytes`; `Text`/`Structured` → Unicode code-point `/0x10FFFF`; `Embedding` passthrough. Это **детерминированные хеши, не ML** | `embedding_pipeline.rs:40,212` |
+| VectorQuantizer | PQ standalone (см. 1bis.3) | `vector_quantizer.rs:209` |
+| QueryPlanner | ⚠️ реальное имя **`NearestNeighborQueryPlanner`**; только планирует (поиск не исполняет); `ExecutionStrategy::Cached` не порождается | `query_planner.rs:111,131` |
+| ReRanker | `WeightedCombination` + `ReciprocalRankFusion` — реальны; ⚠️ **`LearnToRank` и `Custom` — заглушки** | `reranking.rs:14,103` |
+| ShardCoordinator | реальное consistent hashing, `virtual_nodes` деф. **150** | `shard_coordinator.rs:164,212` |
+| SemanticRouter | `IndexHandle{Hnsw\|DiskAnn}` + LRU query-кэш; consistent hashing **сам не использует**; DiskAnn-бэкенд не поддерживает `remove`/`contains` | `router.rs:39,347` |
+
+### 1bis.5 SIMD и Semantic DHT — корректировки
+
+- **SIMD** (`simd.rs:24,53,82`): runtime-детект NEON / SSE/AVX/AVX2 для `l2/dot/cosine`.
+  ⚠️ **AVX-512 упомянут в комментарии, но НЕ реализован.** ⚠️ SIMD **не используется ни HNSW**
+  (там `hnsw_rs`), **ни DiskANN** (свой скаляр) — только DHT и аналитические модули.
+- ⚠️ **Semantic DHT — распределённый поиск это заглушка**: `replicate_to_peer` (`dht_node.rs:409`)
+  → no-op, `query_peer` (`:430`) → всегда `None` → `search_distributed` вырождается в локальный.
+  Векторная маршрутизация (`SemanticRoutingTable`, greedy `find_nearest_peers`) и локальный
+  поиск — реальны; межузловой обмен — нет. Полный реестр заглушек: `[[../Wiki/11-RealityCheck]]`.
+
+---
+
 ## 2. HNSW — Hierarchical Navigable Small World
 
 ### 2.1 Structure
