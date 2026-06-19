@@ -1,15 +1,15 @@
 # IPFRS — Inter-Planetary File Rust System
 
-> Distributed content-addressed file system that unifies storage with ML intelligence.  
-> Files are identified by their content hash (CID). Every block is its own address.
+> Распределённая контент-адресуемая файловая система, объединяющая хранение с ML-интеллектом.  
+> Файлы идентифицируются по хешу содержимого (CID). Каждый блок — сам себе адрес.
 
 ---
 
-## Architecture — Helicopter View
+## Архитектура — вид с высоты
 
 ```mermaid
 graph TD
-    User(["👤 User"])
+    User(["👤 Пользователь"])
     CLI["💻 CLI\nipfrs-cli"]
     PY["🐍 Python"]
     JS["📦 Node.js"]
@@ -22,19 +22,19 @@ graph TD
     User --> JS
     User --> WB
 
-    subgraph IPFRS ["IPFRS System"]
+    subgraph IPFRS ["Система IPFRS"]
         direction TB
 
-        IF["🚪 ipfrs-interface  ·  Gateway\n─────────────────────────────\nauth · TLS · backpressure\ngRPC · GraphQL · WS · FFI"]
+        IF["🚪 ipfrs-interface  ·  Шлюз\n─────────────────────────────\nauth · TLS · backpressure\ngRPC · GraphQL · WS · FFI"]
 
-        NODE["🧠 ipfrs  ·  Node / Orchestrator\n─────────────────────────────\nadd · get · search · query · pin · dag"]
+        NODE["🧠 ipfrs  ·  Узел / Оркестратор\n─────────────────────────────\nadd · get · search · query · pin · dag"]
 
         subgraph DOMAINS ["5 Bounded Contexts"]
             direction LR
             ST["💾 Storage\nSled + WAL\nGC · tiers\ndecorators"]
             NW["🌐 Network\nlibp2p · DHT\nGossip · NAT\nreputation"]
             SM["🔍 Semantic\nHNSW · DiskANN\nembeddings\nre-ranking"]
-            LG["🤖 TensorLogic\n8 inference engines\nautograd · RL\nneuro-symbolic"]
+            LG["🤖 TensorLogic\n20+ движков вывода\nautograd · RL\nneuro-symbolic"]
             TR["📡 Transport\nBitswap · Session\nWantList · QUIC\nTensorSwap"]
         end
 
@@ -58,92 +58,92 @@ graph TD
 
 ---
 
-## CID — Universal Boundary Token
+## CID — универсальный токен границы
 
 ```mermaid
 flowchart LR
-    B["📄 Bytes"] --> H{"hash()"} --> CID["🔑 CID\ncontent identifier"]
+    B["📄 Байты"] --> H{"hash()"} --> CID["🔑 CID\nидентификатор содержимого"]
 
-    CID -->|"storage key"| ST["💾 Storage\nSled B+ tree"]
-    CID -->|"DHT record"| NW["🌐 Network\nCID → peers"]
-    CID -->|"vector link"| SM["🔍 Semantic\nHNSW node"]
-    CID -->|"rule content"| LG["🤖 Logic\nIPLD block"]
-    CID -->|"peer request"| TR["📡 Transport\nWant(CID)"]
+    CID -->|"ключ хранения"| ST["💾 Storage\nSled B+ tree"]
+    CID -->|"запись в DHT"| NW["🌐 Network\nCID → пиры"]
+    CID -->|"ссылка вектора"| SM["🔍 Semantic\nузел HNSW"]
+    CID -->|"содержимое правила"| LG["🤖 Logic\nIPLD-блок"]
+    CID -->|"запрос пиру"| TR["📡 Transport\nWant(CID)"]
 ```
 
-> All cross-context communication is just "pass a CID".
+> Любое межконтекстное взаимодействие сводится к «передай CID».
 
 ---
 
-## Data Flows
+## Потоки данных
 
-### ADD — store a file
+### ADD — сохранение файла
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor User as Пользователь
     participant Node
     participant Storage
     participant Network
     participant Semantic
 
     User->>Node: add(file, 100 MB)
-    Node->>Node: chunk → 391 blocks (256 KB each)
-    loop for each block
+    Node->>Node: chunk → 391 блок (по 256 KB)
+    loop для каждого блока
         Node->>Storage: put(block) → CID
         Node-)Network: announce(CID)
         Node->>Semantic: index(CID, embed)
     end
     Node-->>User: root_CID
-    Note over User,Semantic: ~300 ms (no semantic) · ~900 ms (with semantic)
+    Note over User,Semantic: ~300 мс (без семантики) · ~900 мс (с семантикой)
 ```
 
-### GET — retrieve a file
+### GET — получение файла
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor User as Пользователь
     participant Node
     participant Storage
     participant Network
     participant Transport
-    participant Peer as Remote Peer
+    participant Peer as Удалённый пир
 
     User->>Node: get(CID)
     Node->>Storage: get(CID)
-    alt Local hit
+    alt Локальное попадание
         Storage-->>Node: Block ✓
-        Note right of Storage: LRU: 30 µs · Sled: 100 µs
-    else Local miss
+        Note right of Storage: LRU: 30 мкс · Sled: 100 мкс
+    else Локальный промах
         Node->>Network: find_providers(CID)
-        Note right of Network: Kademlia DHT · 150–300 ms
+        Note right of Network: Kademlia DHT · 150–300 мс
         Network-->>Node: [PeerId₁, PeerId₂, ...]
         Node->>Transport: create_session([CID])
         Transport->>Peer: Want(CID)
         Peer-->>Transport: Block(CID, data)
-        Transport->>Transport: verify hash(data)==CID ✓
+        Transport->>Transport: проверка hash(data)==CID ✓
         Transport->>Storage: put(block)
         Transport-->>Node: Block ✓
     end
-    Node-->>User: bytes
+    Node-->>User: байты
 ```
 
-### SEARCH — semantic query
+### SEARCH — семантический запрос
 
 ```mermaid
 sequenceDiagram
-    actor User
+    actor User as Пользователь
     participant Node
-    participant Model as ML Model
+    participant Model as ML-модель
     participant HNSW
     participant Storage
 
     User->>Node: search("deep learning", k=10)
     Node->>Model: embed(query) → vec[768]
     Node->>HNSW: search(vec, k=10)
-    Note right of HNSW: Layered descent · ~99% recall · 1–10 ms
+    Note right of HNSW: Послойный спуск · ~99% recall · 1–10 мс
     HNSW-->>Node: [(CID₁, 0.92) ... (CID₁₀, 0.71)]
-    loop for each result
+    loop для каждого результата
         Node->>Storage: get_metadata(CIDᵢ)
     end
     Node-->>User: [{cid, score, title, preview}]
@@ -151,43 +151,46 @@ sequenceDiagram
 
 ---
 
-## Storage — Decorator Stack
+## Storage — стек декораторов
 
 ```mermaid
 graph TD
     REQ["📥 put / get / has"]
     D1["🔒 EncryptedBlockStore · AES-GCM"]
     D2["📦 CompressionBlockStore · zstd/lz4"]
-    D3["🔍 DedupBlockStore · BF + exact hash"]
-    D4["💾 CachedBlockStore · LRU in-memory"]
-    D5["📊 QuotaBlockStore · size limit"]
-    D6["⏱️ TtlBlockStore · auto-expiry"]
+    D3["🔍 DedupBlockStore · BF + точный хеш"]
+    D4["💾 CachedBlockStore · LRU в памяти"]
+    D5["📊 QuotaBlockStore · лимит размера"]
+    D6["⏱️ TtlBlockStore · авто-протухание"]
     IMPL["🗄️ SledBlockStore · B+ tree · ACID · WAL"]
     DISK["💿 NVMe SSD"]
 
     REQ --> D1 --> D2 --> D3 --> D4 --> D5 --> D6 --> IMPL --> DISK
 ```
 
+> Это иллюстративный полный стек. Реально собираемый по умолчанию стек —
+> **`Bloom → Cache → Sled`** (`helpers.rs:136`). Подробности в [Wiki/04-StorageContext.md](Wiki/04-StorageContext.md).
+
 ---
 
-## Network — Peer-to-Peer Topology
+## Network — топология P2P
 
 ```mermaid
 graph TD
-    BS["🏗️ Bootstrap Peers"]
+    BS["🏗️ Bootstrap-пиры"]
 
-    subgraph LAN ["Local Network (mDNS)"]
-        A["Node A"] <-->|"mDNS"| B["Node B"]
-        A <-->|"mDNS"| C["Node C"]
+    subgraph LAN ["Локальная сеть (mDNS)"]
+        A["Узел A"] <-->|"mDNS"| B["Узел B"]
+        A <-->|"mDNS"| C["Узел C"]
     end
 
-    subgraph WAN ["Internet (Kademlia DHT)"]
-        D["Node D"] <-->|"XOR routing"| E["Node E"]
-        E <-->|"XOR routing"| F["Node F"]
+    subgraph WAN ["Интернет (Kademlia DHT)"]
+        D["Узел D"] <-->|"XOR-маршрутизация"| E["Узел E"]
+        E <-->|"XOR-маршрутизация"| F["Узел F"]
     end
 
-    subgraph NAT ["Behind NAT"]
-        H["Node H (hidden)"]
+    subgraph NAT ["За NAT"]
+        H["Узел H (скрытый)"]
     end
 
     BS --> A & D
@@ -198,59 +201,59 @@ graph TD
 
 ---
 
-## Crate Dependency Graph
+## Граф зависимостей крейтов
 
 ```mermaid
 graph TD
-    %% FFI layer
-    PY["🐍 ipfrs-python\nPyO3 · 590 lines"]
-    NJS["📦 ipfrs-nodejs\nnapi-rs · 1K lines"]
-    WASM["🌐 ipfrs-wasm\nwasm-bindgen · 2K lines"]
+    %% Слой FFI
+    PY["🐍 ipfrs-python\nPyO3 · 590 строк"]
+    NJS["📦 ipfrs-nodejs\nnapi-rs · 1K строк"]
+    WASM["🌐 ipfrs-wasm\nwasm-bindgen · 2K строк"]
 
-    %% Interface + CLI
-    CLI["💻 ipfrs-cli\nclap · ratatui · 12K lines"]
-    IF["🚪 ipfrs-interface\nGateway · gRPC · GraphQL · 17K lines"]
+    %% Интерфейс + CLI
+    CLI["💻 ipfrs-cli\nclap · ratatui · 12K строк"]
+    IF["🚪 ipfrs-interface\nШлюз · gRPC · GraphQL · 17K строк"]
 
-    %% Application
-    NODE["🧠 ipfrs\nNode / Orchestrator · 15K lines"]
+    %% Приложение
+    NODE["🧠 ipfrs\nУзел / Оркестратор · 15K строк"]
 
-    %% Domain layer
-    ST["💾 ipfrs-storage\nSled · WAL · GC · 135K lines"]
-    NW["🌐 ipfrs-network\nlibp2p · Kademlia · 156K lines"]
-    SM["🔍 ipfrs-semantic\nHNSW · DiskANN · 142K lines"]
-    TL["🤖 ipfrs-tensorlogic\n8 engines · autograd · 156K lines"]
-    TR["📡 ipfrs-transport\nBitswap · QUIC · 34K lines"]
+    %% Доменный слой
+    ST["💾 ipfrs-storage\nSled · WAL · GC · 135K строк"]
+    NW["🌐 ipfrs-network\nlibp2p · Kademlia · 156K строк"]
+    SM["🔍 ipfrs-semantic\nHNSW · DiskANN · 142K строк"]
+    TL["🤖 ipfrs-tensorlogic\n20+ движков · autograd · 156K строк"]
+    TR["📡 ipfrs-transport\nBitswap · QUIC · 34K строк"]
 
     %% Shared Kernel
-    CORE["⚙️ ipfrs-core\nCid · Block · Ipld · 23K lines"]
+    CORE["⚙️ ipfrs-core\nCid · Block · Ipld · 23K строк"]
 
     %% FFI → node
     PY  --> NODE
     PY  --> TL
     NJS --> NODE
     NJS --> TL
-    WASM -.->|"no internal deps"| CORE
+    WASM -.->|"нет внутр. зависимостей"| CORE
 
     %% CLI
     CLI --> NODE
     CLI --> IF
     CLI --> TL
 
-    %% Interface → domains
+    %% Интерфейс → домены
     IF --> NODE
     IF --> ST
     IF --> NW
     IF --> SM
     IF --> TL
 
-    %% Node → all domains
+    %% Узел → все домены
     NODE --> ST
     NODE --> NW
     NODE --> SM
     NODE --> TL
     NODE --> TR
 
-    %% Domain cross-deps
+    %% Кросс-зависимости доменов
     NW --> TL
     SM --> ST
     SM --> NW
@@ -260,7 +263,7 @@ graph TD
     TR --> TL
     TL --> ST
 
-    %% All → core
+    %% Все → core
     ST  --> CORE
     NW  --> CORE
     SM  --> CORE
@@ -270,7 +273,7 @@ graph TD
     IF  --> CORE
     CLI --> CORE
 
-    %% Styles
+    %% Стили
     classDef ffi      fill:#fdf4ff,stroke:#d8b4fe,color:#581c87
     classDef app      fill:#d4edda,stroke:#10b981,color:#064e3b
     classDef gateway  fill:#cffafe,stroke:#06b6d4,color:#164e63
@@ -298,9 +301,9 @@ graph TD
 
 ---
 
-## Lines of Code
+## Строки кода
 
-| Crate | Files | Lines |
+| Крейт | Файлы | Строки |
 |-------|------:|------:|
 | `ipfrs-tensorlogic` | 215 | 156,899 |
 | `ipfrs-network` | 225 | 156,501 |
@@ -309,33 +312,52 @@ graph TD
 | `ipfrs-transport` | 61 | 34,299 |
 | `ipfrs-core` | 51 | 23,949 |
 | `ipfrs-interface` | 29 | 17,511 |
-| `ipfrs` (node) | 46 | 15,420 |
+| `ipfrs` (узел) | 46 | 15,420 |
 | `ipfrs-cli` | 36 | 12,821 |
 | `ipfrs-wasm` | 5 | 2,726 |
 | `ipfrs-nodejs` | 2 | 1,060 |
 | `ipfrs-python` | 1 | 590 |
-| **Total** | **1,005** | **699,852** |
+| **Итого** | **1,005** | **699,852** |
 
-> **699,852 lines** of Rust across **1,005 files** in 12 crates (excluding build artifacts).  
-> **724 files** contain `#[cfg(test)]` — extensive inline test coverage.  
-> **~193 external dependencies** across 15 `Cargo.toml` files.  
-> **54,466 lines** of Markdown documentation (architecture wikis, RoadMap, guides).  
-> **Location**: `ipfrs_source/` (moved from `Vendor/ipfrs`)  
-> _Recounted 2026-06-19 — figures verified against the working tree._
+> **699,852 строк** Rust в **1,005 файлах** в 12 крейтах (без артефактов сборки).  
+> **724 файла** содержат `#[cfg(test)]` — обширное инлайн-покрытие тестами.  
+> **~193 внешних зависимости** в 15 файлах `Cargo.toml`.  
+> **Расположение**: `ipfrs_source/` (перенесено из `Vendor/ipfrs`).  
+> _Пересчитано 2026-06-19 — выверено по рабочему дереву._
 
 ---
 
-## Tech Stack
+## Документация архитектуры
 
-| Layer | Technology |
-|-------|-----------|
-| Runtime | Tokio async |
-| Storage engine | Sled (B+ tree, ACID, WAL) |
-| Networking | libp2p (QUIC, TCP, Kademlia, Gossip, mDNS) |
-| Vector index | hnsw_rs + DiskANN |
-| Inference | Custom Datalog + 8 engine types |
+| Папка / документ | Файлы | Строки |
+|------------------|------:|-------:|
+| `Wiki_Antropic/` | 20 | 8,853 |
+| `Wiki_Arch_GLM/` | 13 | 6,362 |
+| `Wiki/` (новая, DDD) | 13 | 1,890 |
+| `IPFRS_ARCHITECTURE.md` | 1 | 1,599 |
+| `Wiki_GLM/` | 2 | 1,544 |
+| `RoadMap/` | 7 | 1,536 |
+| `README.md` (корень) | 1 | 435 |
+| **Итого (архитектура)** | **57** | **22,219** |
+
+> **22,187 строк** документации архитектуры в **57 Markdown-файлах** (7 баз знаний + корневые доки).  
+> **3 «живые» вики**: [`Wiki/`](Wiki/00-INDEX.md) (DDD, выверена по коду), [`Wiki_Antropic/`](Wiki_Antropic/INDEX.md) (доменные статьи), [`Wiki_Arch_GLM/`](Wiki_Arch_GLM/00-INDEX.md) (GLM-вариант).  
+> Всего Markdown в репозитории (без `target/`, `Vendor/`): **130 файлов, 56,560 строк** — остальное это доки исходников и служебное.  
+> _Пересчитано 2026-06-19._
+
+---
+
+## Технологический стек
+
+| Слой | Технология |
+|------|-----------|
+| Рантайм | Tokio async |
+| Движок хранения | Sled (B+ tree, ACID, WAL) |
+| Сеть | libp2p (QUIC, TCP, Kademlia, Gossip, mDNS) |
+| Векторный индекс | hnsw_rs + DiskANN |
+| Вывод | Собственный Datalog + 20+ типов движков |
 | TLS | rustls |
-| Serialization | DAG-CBOR (IPLD), Apache Arrow, SafeTensors |
+| Сериализация | DAG-CBOR (IPLD), Apache Arrow, SafeTensors |
 | gRPC | tonic |
 | GraphQL | async-graphql |
 | Python FFI | PyO3 |
@@ -344,60 +366,70 @@ graph TD
 
 ---
 
-## Key Architectural Decisions
+## Ключевые архитектурные решения
 
-| Decision | Choice | Why |
-|----------|--------|-----|
-| Content addressing | CID = hash(data) | Deduplication, integrity, cacheable, immutable |
-| Storage | Sled B+ tree | Pure Rust, ACID, no C deps |
-| Network | libp2p | Battle-tested, protocol-agnostic, NAT traversal |
-| Vector index | HNSW | O(log n) queries, ~99% recall, in-memory |
-| Inference | Horn clause Datalog | Decidable, composable, neuro-symbolic fusion |
-| Transport | Bitswap + WantList | Parallel multi-peer block exchange |
-
----
-
-## Known Weaknesses
-
-- JWT uses **MD5** instead of HS256 — `interface/src/auth.rs:449`
-- TLS cert generator returns a **stub** — `interface/src/tls.rs:314`
-- Backpressure semaphore permits **not revoked** on window decrease — `backpressure.rs:182`
-- Storage GC `min_age` parameter accepted but **never applied** — `gc.rs:collect`
-- FedAvg **always times out** when `min_peers > 0` — `tensorlogic_ops.rs:1131`
-- Arrow "zero-copy" path performs **3 actual copies** — `interface/src/arrow.rs`
+| Решение | Выбор | Почему |
+|---------|-------|--------|
+| Контент-адресация | CID = hash(data) | Дедупликация, целостность, кешируемость, неизменяемость |
+| Хранение | Sled B+ tree | Чистый Rust, ACID, без C-зависимостей |
+| Сеть | libp2p | Проверенная, протокол-агностичная, обход NAT |
+| Векторный индекс | HNSW | Запросы O(log n), ~99% recall, в памяти |
+| Вывод | Horn-clause Datalog | Разрешимый, композируемый, нейро-символическая фузия |
+| Транспорт | Bitswap + WantList | Параллельный обмен блоками с несколькими пирами |
 
 ---
 
-## Documentation
+## Известные слабые места
 
-### Wiki Structure
+> Обновлено 2026-06-19 по итогам глубокого исследования (7 агентов, привязка `file:line`).
+> Полный реестр — [Wiki/11-RealityCheck.md](Wiki/11-RealityCheck.md).
+
+**Опровергнутые ранее «критические баги»** (по факту кода уже корректны):
+- JWT — это **HMAC-HS256, а не MD5** — `ipfrs/src/auth.rs:461`
+- Backpressure-семафор **корректно** освобождает permits — `ipfrs-interface/src/backpressure.rs:185`
+- «Баг FedAvg-таймаута» в `tensorlogic_ops.rs:1131` — **файла/строки не существует**
+
+**Реальные заглушки и слабые места:**
+- **Выкачка блоков по swarm — заглушка** → `NotFound` — `ipfrs-network/src/node.rs:1311` (блокер P2P GET)
+- **Целостность при чтении НЕ проверяется** (`get` без `verify()`) — `ipfrs-storage/src/blockstore.rs:350`
+- **`VectorIndex::rebuild`** молча опустошает индекс — `ipfrs-semantic/src/hnsw.rs:586`
+- **TLS-генератор в node-крейте — заглушка** (rcgen только в комментарии) — `ipfrs/src/tls.rs:314`
+- **GraphSync / erasure (Reed-Solomon) / NAT-STUN** — заглушки — `ipfrs-transport/src/{graphsync,erasure,nat_traversal}.rs`
+- **Bitswap дублирован** в `ipfrs-transport` и `ipfrs-network` (несовместимые типы)
+- GC-порог `min_age` enforced только в одной из трёх реализаций GC
+
+---
+
+## Документация
+
+### Структура вики (3 «живые» базы знаний)
 
 ```
-Wiki/ (or Wiki_Arch_Claude/)
-├── 01-Overview.md          — What is IPFRS?
-├── 02-ArchitectureStack.md — 6-layer stack
-├── 03-BoundedContexts.md   — 5 bounded contexts (DDD)
-├── 04-StorageDomain.md     — Sled, blocks, decorators, GC
-├── 05-NetworkDomain.md     — libp2p, DHT, peer discovery
-├── 06-SemanticDomain.md    — HNSW, vector search
-├── 07-LogicDomain.md       — Backward chaining, inference
-├── 08-TransportDomain.md   — Bitswap, sessions
-├── 09-DataFlows.md         — 4 end-to-end flows
-├── 10-Performance.md       — P50/P99/P999 latency table
-├── 11-ErrorHandling.md     — Recovery strategies
-├── 12-MasterArchitecture.md — Full DDD analysis (RU)
-├── 13-DeepArchitecture.md  — Deep architecture (RU)
-├── 14-HLD.md               — Helicopter view (ASCII)
-└── 15-HLD-Mermaid.md       — Helicopter view (Mermaid)
+Wiki/                       — НОВАЯ: DDD «как функционирует IPFRS», выверена по коду
+├── 00-INDEX · README       — навигация, карта зависимостей
+├── 01-DomainOverview       — домен, единый язык, инварианты
+├── 02-StrategicDesign      — 7 bounded contexts, карта контекстов
+├── 03-SharedKernel         — Cid / Block / Ipld
+├── 04-08 контексты         — Storage · Network · Semantic · TensorLogic · Transport
+├── 09-ApplicationLayer     — Node-фасад + Gateway
+├── 10-DataFlows            — ADD/GET/SEARCH/INFER/FedAvg сквозь контексты
+└── 11-RealityCheck         — реестр заглушек, расхождения модели с кодом
+
+Wiki_Antropic/              — подробные доменные статьи (паттерн Карпати, RU)
+├── 01-15 + 12-RealityCheck — обзор, домены, потоки, HLD, проверка реальности
+└── INDEX · README · WIKI_SCHEMA · log
+
+Wiki_Arch_GLM/              — GLM-вариант DDD-анализа (13 файлов)
 ```
 
-### Source Code
+### Исходный код
 
-- **`ipfrs_source/`** — Complete IPFRS codebase (moved to root)
-  - `crates/` — 12 Rust crates (storage, network, semantic, tensorlogic, etc.)
-  - `Cargo.toml` — Workspace configuration
-  - `ARCHITECTURE_*.md` — Original architecture docs
+- **`ipfrs_source/`** — полная кодовая база IPFRS (перенесена в корень)
+  - `crates/` — 12 Rust-крейтов (storage, network, semantic, tensorlogic и др.)
+  - `Cargo.toml` — конфигурация workspace
+  - `book/`, `CRATE_DOCS.md` — документация исходников
 
 ---
 
-*Analyzed with Claude Sonnet 4.6 · 6-agent parallel workflow · 2026-06-18*
+*Глубокий анализ: Claude Opus 4.8 · параллельный workflow из 7 агентов · 2026-06-19*
+*Первичный анализ: Claude Sonnet 4.6 · 6 агентов · 2026-06-18*
