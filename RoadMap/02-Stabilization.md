@@ -1,320 +1,265 @@
 ---
-title: Stabilization (v0.2.1 Patch Release)
-summary: Weeks 1-2 tasks — enable CI/CD, fix bugs, documentation, release prep
+title: Стабилизация (v0.2.1 Patch релиз)
+summary: Задачи Неделя 1-2 — включить CI/CD, зафиксить баги, документация, подготовка к релизу
 tags: [stabilization, release, ci-cd, testing]
 ---
 
-# Stabilization (Weeks 1-2)
+# Стабилизация (Неделя 1-2)
 
-> Prepare v0.2.1 patch release with bug fixes, CI/CD, and process improvements.
+> Подготовить v0.2.1 patch релиз с исправлениями багов, CI/CD и улучшениями процесса.
 
 ---
 
-## Checklist
+## Чеклист
 
-### Week 1: Fixes & CI/CD
+### Неделя 1: Исправления & CI/CD
 
-- [ ] **Bugs #1-3 fixed** (JWT, TLS, Backpressure)
-  - [ ] All unit tests passing
-  - [ ] Code review completed
-  - [ ] Commits pushed to `fix/*` branches
+- [ ] **Баги #1-3 исправлены** (JWT, TLS, Backpressure)
+  - [ ] Все unit тесты проходят
+  - [ ] Code review завершен
+  - [ ] Коммиты запушены в `fix/*` ветки
 
-- [ ] **CI/CD enabled**
-  - [ ] Move `ipfrs_source/.github/workflows/ci.yml.disabled` → `ci.yml`
-  - [ ] Test locally: `cargo build -p ipfrs --all-features`
-  - [ ] Test locally: `cargo nextest run --all-features`
-  - [ ] GitHub Actions runs on push
-  - [ ] No regressions in test suite
+- [ ] **CI/CD включен**
+  - [ ] Переместить `ipfrs_source/.github/workflows/ci.yml.disabled` → `ci.yml`
+  - [ ] Тест локально: `cargo build -p ipfrs --all-features`
+  - [ ] Тест локально: `cargo nextest run --all-features`
+  - [ ] GitHub Actions запущен на push
+  - [ ] Нет регрессий в тестовом suite
 
-- [ ] **Documentation standards added**
-  - [ ] Create `SECURITY.md` (see template below)
-  - [ ] Create `CONTRIBUTING.md` (link to this RoadMap)
-  - [ ] Create `CODE_OF_CONDUCT.md` (standard Rust community)
+- [ ] **Стандарты документации добавлены**
+  - [ ] Создать `SECURITY.md` (смотри template ниже)
+  - [ ] Создать `CONTRIBUTING.md` (ссылка на этот RoadMap)
+  - [ ] Создать `CODE_OF_CONDUCT.md` (стандарт Rust комьюнити)
 
-- [ ] **GitHub settings configured**
-  - [ ] Branch protection: require 1 review before merge
-  - [ ] Require status checks (CI/CD)
+- [ ] **GitHub настройки сконфигурированы**
+  - [ ] Branch protection: требовать 1 review перед merge
+  - [ ] Требовать status checks (CI/CD)
   - [ ] Allow auto-delete head branches on merge
 
-### Week 2: Remaining Bugs & Release
+### Неделя 2: Оставшиеся баги & Релиз
 
-- [ ] **Bugs #4-6 fixed** (GC, FedAvg, Arrow)
-  - [ ] All unit tests passing
-  - [ ] Benchmarks show no regression
-  - [ ] Code review completed
+- [ ] **Баги #4-6 исправлены** (GC, FedAvg, Arrow)
+  - [ ] Все unit тесты проходят
+  - [ ] Бенчмарки не показывают регрессии
+  - [ ] Code review завершен
 
 - [ ] **Version bump & changelog**
-  - [ ] Update `ipfrs_source/Cargo.toml`: `version = "0.2.1"`
-  - [ ] Update `ipfrs_source/CHANGELOG.md`:
+  - [ ] Обновить `ipfrs_source/Cargo.toml`: `version = "0.2.1"`
+  - [ ] Обновить `ipfrs_source/CHANGELOG.md`:
     ```markdown
     ## [0.2.1] - 2026-07-03 "Stability Patch"
     
-    ### Fixed
-    - JWT: Replace MD5 with HS256 HMAC (#1)
-    - TLS: Implement real certificate generation, not stub (#2)
-    - Backpressure: Release semaphore permits on window decrease (#3)
-    - GC: Apply min_age parameter (#4)
-    - FedAvg: Fix timeout when min_peers > 0 (#5)
-    - Arrow: Optimize serialization (remove extra copies) (#6)
+    ### Исправлено
+    - JWT: Заменить MD5 на HS256 HMAC (#1)
+    - TLS: Реализовать реальную генерацию сертификатов, не stub (#2)
+    - Backpressure: Освобождать семафор permits при уменьшении окна (#3)
+    - GC: Применить параметр min_age (#4)
+    - FedAvg: Исправить timeout при min_peers > 0 (#5)
+    - Arrow: Оптимизировать сериализацию (убрать лишние копии) (#6)
     
-    ### Added
-    - Security policy (SECURITY.md)
-    - Contributing guide (CONTRIBUTING.md)
+    ### Добавлено
+    - Политика безопасности (SECURITY.md)
+    - Гайд для контрибьюторов (CONTRIBUTING.md)
     - Code of Conduct
-    - GitHub Actions CI/CD enabled
+    - GitHub Actions CI/CD включен
     ```
 
-- [ ] **Tag & release**
-  - [ ] Create annotated tag: `git tag -a v0.2.1 -m "Stability patch release"`
+- [ ] **Tag & релиз**
+  - [ ] Создать annotated tag: `git tag -a v0.2.1 -m "Stability patch release"`
   - [ ] Push tag: `git push origin v0.2.1`
-  - [ ] GitHub Releases: Create from tag (auto-populate from CHANGELOG.md)
+  - [ ] GitHub Releases: Создать из tag (автоматически заполнится из CHANGELOG.md)
 
-- [ ] **Publish artifacts (optional)**
-  - [ ] `cargo publish` to crates.io (if upstream allows)
-  - [ ] npm package update for `@cool-japan/ipfrs-node` (if published)
-  - [ ] PyPI update for `ipfrs` (if published)
+- [ ] **Публикация артефактов (опционально)**
+  - [ ] `cargo publish` в crates.io (если upstream разрешит)
+  - [ ] npm package update для `@cool-japan/ipfrs-node` (если опубликован)
+  - [ ] PyPI update для `ipfrs` (если опубликован)
 
 ---
 
-## File Templates
+## Шаблоны файлов
 
 ### SECURITY.md
 
 ```markdown
-# Security Policy
+# Политика безопасности
 
-## Reporting Vulnerabilities
+## Отчёт об уязвимостях
 
-**DO NOT open a public GitHub issue for security vulnerabilities.**
+**НЕ открывайте публичный GitHub issue для уязвимостей безопасности.**
 
-Email your report to: **[your-email-here]** with subject `[SECURITY] IPFRS: <vulnerability title>`
+Отправьте отчёт на: **[ваш-email]** с темой `[SECURITY] IPFRS: <название уязвимости>`
 
-Include:
-- Description of the vulnerability
-- Affected versions (e.g., 0.2.0, 0.2.1)
-- Steps to reproduce
-- Potential impact
-- Suggested fix (optional)
+Включите:
+- Описание уязвимости
+- Затронутые версии (e.g., 0.2.0, 0.2.1)
+- Шаги воспроизведения
+- Потенциальное влияние
+- Предложенное исправление (опционально)
 
-## Supported Versions
+## Поддерживаемые версии
 
-| Version | Status | Security Updates |
-|---------|--------|------------------|
-| 0.2.1 | Current | ✅ Yes |
-| 0.2.0 | Previous | ✅ Yes (backports) |
-| 0.1.x | EOL | ❌ No |
+| Версия | Статус | Security Updates |
+|--------|--------|------------------|
+| 0.2.1 | Текущая | ✅ Да |
+| 0.2.0 | Предыдущая | ✅ Да (backports) |
+| 0.1.x | EOL | ❌ Нет |
 
-## Known Limitations & Fixes
+## Известные ограничения & исправления
 
-### v0.2.0 (Fixed in v0.2.1)
-- ⚠️ JWT authentication used MD5 instead of HS256 → **FIXED**
-- ⚠️ TLS certificate generator returned stub cert → **FIXED**
-- ⚠️ Backpressure window decrease didn't release permits → **FIXED**
-- ⚠️ GC `min_age` parameter was ignored → **FIXED**
-- ⚠️ FedAvg always timed out with `min_peers > 0` → **FIXED**
+### v0.2.0 (Исправлено в v0.2.1)
+- ⚠️ JWT authentication использовал MD5 вместо HS256 → **ИСПРАВЛЕНО**
+- ⚠️ TLS certificate generator возвращал stub cert → **ИСПРАВЛЕНО**
+- ⚠️ Backpressure window decrease не освобождал permits → **ИСПРАВЛЕНО**
+- ⚠️ GC `min_age` параметр был игнорируется → **ИСПРАВЛЕНО**
+- ⚠️ FedAvg всегда тайм-аутил при `min_peers > 0` → **ИСПРАВЛЕНО**
 
-## Security Best Practices for Users
+## Лучшие практики безопасности для пользователей
 
-When running IPFRS in production:
+При запуске IPFRS в production:
 
-1. **Always use HTTPS/TLS** (enable with rustls)
-2. **Rotate peer identities** regularly (PeerIdentityManager)
-3. **Enable encryption at rest** for sensitive data (ChaCha20-Poly1305 or AES-256-GCM)
-4. **Limit peer connections** via ConnectionManager
-5. **Monitor GossipSub mesh health** for eclipse attacks
-6. **Use circuit breaker** for failed peer connections
-7. **Enable Prometheus metrics** for observability
-
-## Disclosure Timeline
-
-### For Critical Vulnerabilities
-- Day 0: Report received
-- Day 1-2: Assessment & fix development
-- Day 3-5: Testing & review
-- Day 6-7: v0.2.x patch release
-- Day 8: Public disclosure
-
-## Acknowledgments
-
-Security fixes are attributed in releases. Thank you for helping keep IPFRS secure!
+1. **Всегда использовать HTTPS/TLS** (включить с rustls)
+2. **Ротировать peer identities** регулярно (PeerIdentityManager)
+3. **Включить encryption at rest** для чувствительных данных (ChaCha20-Poly1305 или AES-256-GCM)
+4. **Ограничить peer соединения** через ConnectionManager
+5. **Мониторить GossipSub mesh health** для eclipse атак
+6. **Использовать circuit breaker** для failed peer соединений
+7. **Включить Prometheus metrics** для observability
 ```
 
 ### CONTRIBUTING.md
 
 ```markdown
-# Contributing to IPFRS
+# Вклад в IPFRS
 
-Thank you for your interest in contributing! This project follows Apache 2.0 licensing and welcomes community contributions.
+Спасибо за интерес к вкладу! Этот проект использует Apache 2.0 лицензию и приветствует community contributions.
 
-## Getting Started
+## Начало работы
 
-1. **Read the RoadMap:** [../RoadMap/README.md](../RoadMap/README.md)
-2. **Understand the architecture:** See `Wiki_Arch_Claude/` for 15 detailed articles
-3. **Set up local development:**
+1. **Прочитать RoadMap:** [../RoadMap/README.md](../RoadMap/README.md)
+2. **Понять архитектуру:** Смотри `Wiki_Arch_Claude/` для 15 подробных статей
+3. **Настроить локальную разработку:**
    ```bash
    cd ipfrs_source
    cargo build --all-features
    cargo test --all-features
    ```
 
-## Contribution Types
+## Типы контрибуции
 
 ### Bug Fixes (Easiest)
-- Pick from [01-Critical-Bugs.md](../RoadMap/01-Critical-Bugs.md)
-- Follow the PR template in each bug description
-- Include unit test
-- Link the GitHub issue in your PR
+- Выбрать из [01-Critical-Bugs.md](../RoadMap/01-Critical-Bugs.md)
+- Следовать шаблону PR в каждом описании бага
+- Включить unit test
+- Ссылка на GitHub issue в PR
 
-### Documentation
-- Improve `Wiki_Arch_Claude/` articles
-- Write tutorials in `ipfrs_source/book/src/`
-- Fix typos / examples
+### Документация
+- Улучшить статьи `Wiki_Arch_Claude/`
+- Писать туториалы в `ipfrs_source/book/src/`
+- Исправлять typos / примеры
 
-### Features
-- Check [04-Features.md](../RoadMap/04-Features.md) for approved ideas
-- Discuss large features in GitHub Discussions first
-- Include tests & documentation
+### Фичи
+- Проверить [04-Features.md](../RoadMap/04-Features.md) для одобренных идей
+- Обсудить большие фичи в GitHub Discussions сначала
+- Включить тесты & документацию
 
-### Testing & Benchmarks
-- Improve test coverage (run `cargo tarpaulin`)
-- Add benchmarks (`cargo bench`)
-- Profile performance with `cargo flamegraph`
+### Тестирование & Бенчмарки
+- Улучшить test coverage (запусти `cargo tarpaulin`)
+- Добавить бенчмарки (`cargo bench`)
+- Профилировать performance с `cargo flamegraph`
 
-## PR Process
+## PR Процесс
 
-1. Create a branch: `git checkout -b fix/your-issue-name`
-2. Make changes + tests + documentation
-3. Commit with clear message: `git commit -m "fix: description"`
+1. Создать ветку: `git checkout -b fix/your-issue-name`
+2. Сделать изменения + тесты + документация
+3. Коммитить с ясным сообщением: `git commit -m "fix: описание"`
 4. Push: `git push -u origin fix/your-issue-name`
-5. Open PR on GitHub with:
-   - Clear title
-   - Reference to issue (`Fixes #123`)
-   - Description of changes
-   - Checklist (test, doc, lint)
+5. Открыть PR на GitHub с:
+   - Ясным заголовком
+   - Ссылка на issue (`Fixes #123`)
+   - Описание изменений
+   - Чеклист (тест, док, lint)
 
-### PR Checklist
+### PR Чеклист
 
 ```markdown
-## Description
-[Describe what you're fixing/adding]
+## Описание
+[Описать что вы чините/добавляете]
 
-## Type of Change
+## Тип изменения
 - [ ] Bug fix
-- [ ] New feature
-- [ ] Documentation
-- [ ] Performance improvement
+- [ ] Новая фича
+- [ ] Документация
+- [ ] Улучшение производительности
 
-## Testing
-- [ ] Unit tests added/updated
-- [ ] Existing tests pass: `cargo test --all-features`
-- [ ] No clippy warnings: `cargo clippy -- -D warnings`
+## Тестирование
+- [ ] Unit тесты добавлены/обновлены
+- [ ] Существующие тесты проходят: `cargo test --all-features`
+- [ ] Нет clippy warnings: `cargo clippy -- -D warnings`
 
-## Documentation
-- [ ] Code comments added (if non-obvious)
-- [ ] `Wiki_Arch_Claude/` articles updated
-- [ ] `CHANGELOG.md` entry added
+## Документация
+- [ ] Комментарии кода добавлены (если non-obvious)
+- [ ] `Wiki_Arch_Claude/` статьи обновлены
+- [ ] `CHANGELOG.md` запись добавлена
 
-## Related Issue
+## Связанный Issue
 Fixes #<issue-number>
 ```
 
-## Code Style
+## Стиль кода
 
-- Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- Use `cargo fmt` before committing
-- Address all `cargo clippy` warnings
-- Comments should explain **why**, not **what** (code is self-documenting)
+- Следовать [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
+- Использовать `cargo fmt` перед коммитом
+- Адресовать все `cargo clippy` warnings
+- Комментарии должны объяснять **почему**, не **что** (код самодокументируется)
 
-## Architecture Notes
+## Заметки об архитектуре
 
-IPFRS uses **Domain-Driven Design** with 5 bounded contexts:
+IPFRS использует **Domain-Driven Design** с 5 bounded contexts:
 - **Storage** (Sled, blocks, GC)
 - **Network** (libp2p, DHT, peers)
 - **Semantic** (HNSW, vector search)
 - **TensorLogic** (inference engines, Datalog)
 - **Transport** (Bitswap, sessions)
 
-See `Wiki_Arch_Claude/03-BoundedContexts.md` for details.
+Смотри `Wiki_Arch_Claude/03-BoundedContexts.md` для деталей.
 
-## Upstream Contributions
+## Upstream контрибуции
 
-This is a fork of [cool-japan/ipfrs](https://github.com/cool-japan/ipfrs). **Bug fixes and non-breaking features should be upstreamed!**
+Это форк [cool-japan/ipfrs](https://github.com/cool-japan/ipfrs). **Bug fixes и non-breaking фичи должны быть отправлены upstream!**
 
-See [05-Upstream-Contribution.md](../RoadMap/05-Upstream-Contribution.md) for how to contribute upstream.
+Смотри [05-Upstream-Contribution.md](../RoadMap/05-Upstream-Contribution.md) для деталей.
 
 ## Code Review
 
-Maintainers will review:
-- [ ] Correctness & safety
+Мейнтейнеры будут проверять:
+- [ ] Корректность & безопасность
 - [ ] Test coverage
-- [ ] Performance impact
-- [ ] Documentation quality
+- [ ] Влияние на производительность
+- [ ] Качество документации
 - [ ] Backward compatibility
 
-## Community
+## Комьюнити
 
-- **Questions?** Open a GitHub Discussion
-- **Found a security issue?** See `SECURITY.md`
-- **Want to discuss ideas?** GitHub Discussions or email
-
----
-
-**Thank you for contributing to IPFRS! 🚀**
-```
-
-### CODE_OF_CONDUCT.md
-
-```markdown
-# Rust Community Code of Conduct
-
-## Our Pledge
-
-In the interest of fostering an open and welcoming environment, we as contributors and maintainers pledge to making participation in our project and our community a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity and expression, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
-
-## Our Standards
-
-Examples of behavior that contributes to creating a positive environment include:
-
-- Using welcoming and inclusive language
-- Being respectful of differing opinions, viewpoints, and experiences
-- Gracefully accepting constructive criticism
-- Focusing on what is best for the community
-- Showing empathy towards other community members
-
-Examples of unacceptable behavior by participants include:
-
-- The use of sexualized language or imagery and unwelcome sexual attention or advances
-- Trolling, insulting/derogatory comments, and personal or political attacks
-- Public or private harassment
-- Publishing others' private information without explicit permission
-- Other conduct which could reasonably be considered inappropriate
-
-## Reporting & Enforcement
-
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team privately. All reports will be reviewed and investigated.
-
-Project maintainers who do not follow or enforce this Code of Conduct in good faith may face temporary or permanent repercussions.
-
-## Scope
-
-This Code of Conduct applies both within project spaces and in public spaces when an individual is representing the project or its community.
+- **Вопросы?** Открыть GitHub Discussion
+- **Нашли security issue?** Смотри `SECURITY.md`
+- **Хотите обсудить идеи?** GitHub Discussions или email
 
 ---
 
-**This Code of Conduct is adapted from the [Contributor Covenant](http://contributor-covenant.org/).**
+**Спасибо за вклад в IPFRS! 🚀**
 ```
 
 ---
 
-## Testing Checklist
+## Тестовый чеклист
 
-### Before Release
+### Перед релизом
 
 ```bash
-# Full test suite
+# Полный test suite
 cargo test --all-features --all --verbose
 
-# Clippy (no warnings)
+# Clippy (нет warnings)
 cargo clippy --all-features --all-targets -- -D warnings
 
 # Format check
@@ -323,91 +268,91 @@ cargo fmt --check
 # Security audit
 cargo audit
 
-# Benchmarks (no regressions)
+# Бенчмарки (нет регрессий)
 cargo bench --all-features
 
-# Code coverage (target: >80%)
+# Code coverage (целевой: >80%)
 cargo tarpaulin --all-features --timeout 300 --out Html
 
 # Documentation build
 cd ipfrs_source/book && mdbook build
 
-# Try building without features
+# Try building без фич
 cargo build --no-default-features
 ```
 
-### CI/CD Verification
+### CI/CD Проверка
 
 ```bash
-# Simulate GitHub Actions locally
-act push  # Requires act: https://github.com/nektos/act
+# Симулировать GitHub Actions локально
+act push  # Требует act: https://github.com/nektos/act
 ```
 
 ---
 
-## Release Notes Template
+## Шаблон Release Notes
 
 ```markdown
 # IPFRS v0.2.1 - Stability Patch
 
-**Release Date:** July 3, 2026
+**Дата релиза:** 3 июля 2026
 
-## Overview
+## Обзор
 
-v0.2.1 is a patch release that fixes 6 critical and high-priority bugs found during 
-code analysis, enables CI/CD, and establishes security & contribution policies.
+v0.2.1 — это patch релиз, который исправляет 6 критических и high-priority багов, найденные
+при анализе кода, включает CI/CD, и устанавливает политики безопасности и контрибуции.
 
-### Download
+### Скачать
 
-- **Source:** [GitHub Release](https://github.com/yunusovt983-art/ipfrs-ai/releases/tag/v0.2.1)
+- **Исходный код:** [GitHub Release](https://github.com/yunusovt983-art/ipfrs-ai/releases/tag/v0.2.1)
 - **Crates.io:** `cargo add ipfrs@0.2.1`
 - **npm:** `npm install @cool-japan/ipfrs-node@0.2.1`
 
-## Security Fixes
+## Исправления безопасности
 
-| Priority | Issue | Fix |
-|----------|-------|-----|
-| 🔴 CRITICAL | JWT used MD5 | Now uses HS256 HMAC |
-| 🔴 CRITICAL | TLS stub cert | Now generates real self-signed certs |
-| 🟠 HIGH | Backpressure | Permits now released on window decrease |
-| 🟠 HIGH | GC min_age | Parameter now respected |
-| 🟡 MEDIUM | FedAvg timeout | Fixed async collection logic |
-| 🟡 MEDIUM | Arrow copies | Memory usage optimized |
+| Приоритет | Issue | Исправление |
+|-----------|-------|------------|
+| 🔴 CRITICAL | JWT использует MD5 | Теперь использует HS256 HMAC |
+| 🔴 CRITICAL | TLS stub cert | Теперь генерирует реальные self-signed серты |
+| 🟠 HIGH | Backpressure | Permits теперь освобождаются при уменьшении окна |
+| 🟠 HIGH | GC min_age | Параметр теперь уважается |
+| 🟡 MEDIUM | FedAvg timeout | Исправлена async логика сбора |
+| 🟡 MEDIUM | Arrow copies | Использование памяти оптимизировано |
 
-## What's New
+## Что нового
 
-- Security policy (`SECURITY.md`)
-- Contributing guide (`CONTRIBUTING.md`)
+- Политика безопасности (`SECURITY.md`)
+- Гайд для контрибьюторов (`CONTRIBUTING.md`)
 - Code of Conduct
-- GitHub Actions CI/CD enabled
-- Complete test coverage maintained
+- GitHub Actions CI/CD включен
+- Full test coverage сохранено
 
-## Upgrade Guide
+## Гайд обновления
 
-No breaking changes. Simply update your dependency:
+Нет breaking changes. Просто обновить зависимость:
 
 ```toml
 [dependencies]
 ipfrs = "0.2.1"
 ```
 
-## Checklist for v0.3.0
+## Чеклист для v0.3.0
 
 - [ ] Release v0.2.1 stable
-- [ ] Continue 0.3.0 development (Intelligence Release)
+- [ ] Продолжить 0.3.0 разработку (Intelligence Release)
 - [ ] Community feedback & issues
 ```
 
 ---
 
-## Timeline
+## Таймлайн
 
-| Date | Task | Status |
-|------|------|--------|
-| Day 1-2 | Fix bugs #1-2 | ⬜ |
-| Day 3-4 | Fix bug #3 | ⬜ |
-| Day 5 | Enable CI/CD, documentation | ⬜ |
-| Day 6-7 | Fix bugs #4-6 | ⬜ |
-| Day 8 | Release v0.2.1 | ⬜ |
+| Дата | Задача | Статус |
+|------|--------|--------|
+| День 1-2 | Зафиксить баги #1-2 | ⬜ |
+| День 3-4 | Зафиксить баг #3 | ⬜ |
+| День 5 | Включить CI/CD, документация | ⬜ |
+| День 6-7 | Зафиксить баги #4-6 | ⬜ |
+| День 8 | Релиз v0.2.1 | ⬜ |
 
-**See also:** [TIMELINE.md](TIMELINE.md) for detailed week-by-week plan.
+**Смотри также:** [TIMELINE.md](TIMELINE.md) для детального неделя-за-неделей плана.

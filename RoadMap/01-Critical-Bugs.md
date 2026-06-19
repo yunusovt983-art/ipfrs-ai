@@ -1,26 +1,26 @@
 ---
-title: Critical Bugs to Fix
-summary: 6 security and correctness issues found during code analysis
+title: Критические баги для исправления
+summary: 6 проблем с безопасностью и корректностью, найденные при анализе кода
 tags: [bugs, security, fixes, priority]
 source: IPFRS_ARCHITECTURE_SONNET.md
 ---
 
-# Critical Bugs to Fix (Weeks 1-2)
+# Критические баги для исправления (Неделя 1-2)
 
-> Found during Sonnet 4.6 architecture analysis. **All 6 must be fixed before v0.2.1.**
+> Найдены при анализе архитектуры Sonnet 4.6. **Все 6 должны быть исправлены перед v0.2.1.**
 
 ---
 
-## Bug #1: JWT Uses MD5 Instead of HS256 🔴 CRITICAL
+## Баг #1: JWT использует MD5 вместо HS256 🔴 КРИТИЧЕСКИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-interface/src/auth.rs:449`  
-**Severity:** 🔴 CRITICAL (Security)  
-**Impact:** JWT tokens are cryptographically weak, tokens can be forged  
-**Time Estimate:** 30 minutes
+**Файл:** `ipfrs_source/crates/ipfrs-interface/src/auth.rs:449`  
+**Серьёзность:** 🔴 КРИТИЧЕСКИЙ (Безопасность)  
+**Влияние:** JWT токены криптографически слабые, могут быть подделаны  
+**Оценка времени:** 30 минут
 
-### Current Code
+### Текущий код
 ```rust
-// WRONG: MD5 is not cryptographically secure
+// НЕПРАВИЛЬНО: MD5 не криптографически безопасен
 jsonwebtoken::encode(
     &header,
     &claims,
@@ -28,12 +28,12 @@ jsonwebtoken::encode(
 )
 ```
 
-### Root Cause
-`jsonwebtoken` crate was configured with `rust_crypto` feature (default). MD5 was used instead of HS256.
+### Причина
+Крейт `jsonwebtoken` был сконфигурирован с фичей `rust_crypto` (по умолчанию). MD5 использовался вместо HS256.
 
-### Fix
+### Исправление
 ```rust
-// CORRECT: Use HS256 (HMAC-SHA256)
+// ПРАВИЛЬНО: Использовать HS256 (HMAC-SHA256)
 let key = jsonwebtoken::EncodingKey::from_secret(secret.as_bytes());
 let token = jsonwebtoken::encode(
     &Header::new(jsonwebtoken::algorithm::Algorithm::HS256),
@@ -42,7 +42,7 @@ let token = jsonwebtoken::encode(
 )?;
 ```
 
-### Testing
+### Тестирование
 ```rust
 #[test]
 fn test_jwt_uses_hs256() {
@@ -53,14 +53,14 @@ fn test_jwt_uses_hs256() {
 }
 ```
 
-### PR Template
+### Шаблон PR
 ```
-Title: fix: Replace JWT MD5 with HS256 HMAC
+Title: fix: Заменить JWT MD5 на HS256 HMAC
 
-- Replace MD5-based JWT encoding with HS256 (HMAC-SHA256)
-- Update Cargo.toml: jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
-- Add unit test to verify algorithm
-- Regenerate all test tokens
+- Заменить MD5-based JWT encoding на HS256 (HMAC-SHA256)
+- Обновить Cargo.toml: jsonwebtoken = { version = "10.4", features = ["rust_crypto"] }
+- Добавить unit test для проверки алгоритма
+- Перегенерировать все test tokens
 
 Fixes: 6-critical-bugs#1
 Closes: #<github-issue-id>
@@ -68,14 +68,14 @@ Closes: #<github-issue-id>
 
 ---
 
-## Bug #2: TLS Certificate Generator Returns Stub 🔴 CRITICAL
+## Баг #2: TLS генератор сертификатов возвращает stub 🔴 КРИТИЧЕСКИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-interface/src/tls.rs:314`  
-**Severity:** 🔴 CRITICAL (Security)  
-**Impact:** TLS connections are not encrypted; MitM attacks possible  
-**Time Estimate:** 1 hour
+**Файл:** `ipfrs_source/crates/ipfrs-interface/src/tls.rs:314`  
+**Серьёзность:** 🔴 КРИТИЧЕСКИЙ (Безопасность)  
+**Влияние:** TLS соединения не шифруются; возможны MitM атаки  
+**Оценка времени:** 1 час
 
-### Current Code
+### Текущий код
 ```rust
 pub struct SelfSignedCertGenerator {
     // ...
@@ -83,7 +83,7 @@ pub struct SelfSignedCertGenerator {
 
 impl SelfSignedCertGenerator {
     pub fn generate(&self) -> Result<(Certificate, PrivateKey)> {
-        // WRONG: Returns hardcoded stub certificate!
+        // НЕПРАВИЛЬНО: Возвращает hardcoded stub сертификат!
         let stub_cert = "-----BEGIN CERTIFICATE-----\n...";
         let stub_key = "-----BEGIN PRIVATE KEY-----\n...";
         Ok((stub_cert.into(), stub_key.into()))
@@ -91,10 +91,10 @@ impl SelfSignedCertGenerator {
 }
 ```
 
-### Root Cause
-Placeholder implementation never replaced with real `rcgen` code.
+### Причина
+Placeholder реализация никогда не была заменена на реальный код `rcgen`.
 
-### Fix
+### Исправление
 ```rust
 use rcgen::{generate_simple_self_signed_cert, Certificate};
 
@@ -107,7 +107,7 @@ impl SelfSignedCertGenerator {
         
         let cert = generate_simple_self_signed_cert(
             subject_alt_names,
-            365 * 24 * 60 * 60, // 1 year validity
+            365 * 24 * 60 * 60, // 1 год действия
         ).map_err(|e| IpfrsError::TlsError(e.to_string()))?;
 
         Ok((
@@ -118,46 +118,33 @@ impl SelfSignedCertGenerator {
 }
 ```
 
-### Testing
+### Тестирование
 ```rust
 #[test]
 fn test_tls_cert_is_generated_not_stubbed() {
     let gen = SelfSignedCertGenerator::new();
     let (cert, key) = gen.generate().unwrap();
     
-    // Verify cert is not the hardcoded stub
+    // Проверить, что сертификат не hardcoded stub
     assert!(!cert.starts_with(b"-----BEGIN CERTIFICATE-----\nMIID"));
     assert!(cert.starts_with(b"-----BEGIN CERTIFICATE-----"));
     
-    // Verify key is valid
+    // Проверить, что ключ валидный
     assert!(key.starts_with(b"-----BEGIN PRIVATE KEY-----"));
-    assert!(key.len() > 200); // Real keys are longer
+    assert!(key.len() > 200); // Реальные ключи длиннее
 }
-```
-
-### PR Template
-```
-Title: fix: Implement real TLS certificate generation (no more stub)
-
-- Replace stubbed SelfSignedCertGenerator.generate() with rcgen
-- Generate self-signed certs with proper validity period (1 year)
-- Support localhost and 127.0.0.1 in SubjectAltName
-- Add unit test to verify generated certs are valid
-
-Security: Fixes TLS stub that exposed traffic to MitM attacks
-Fixes: 6-critical-bugs#2
 ```
 
 ---
 
-## Bug #3: Backpressure Semaphore Not Revoked 🟠 HIGH
+## Баг #3: Backpressure семафор не ревокируется 🟠 ВЫСОКИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-transport/src/backpressure.rs:182`  
-**Severity:** 🟠 HIGH (Correctness)  
-**Impact:** Window decrease doesn't release permits; transfer stalls after resize  
-**Time Estimate:** 45 minutes
+**Файл:** `ipfrs_source/crates/ipfrs-transport/src/backpressure.rs:182`  
+**Серьёзность:** 🟠 ВЫСОКИЙ (Корректность)  
+**Влияние:** Уменьшение окна не освобождает permits; трансфер зависает после resize  
+**Оценка времени:** 45 минут
 
-### Current Code
+### Текущий код
 ```rust
 pub struct BackpressureWindow {
     permits: Arc<Semaphore>,
@@ -165,77 +152,65 @@ pub struct BackpressureWindow {
 
 impl BackpressureWindow {
     pub fn decrease_window(&self, old_size: u32, new_size: u32) {
-        // WRONG: Permits are acquired but never released when window shrinks
+        // НЕПРАВИЛЬНО: Permits берутся но никогда не освобождаются при уменьшении окна
         if new_size < old_size {
             let delta = old_size - new_size;
-            // BUG: Should call permits.add_permits(delta)
-            // Currently does nothing!
+            // БАГ: Должен вызвать permits.add_permits(delta)
+            // Сейчас ничего не делает!
         }
     }
 }
 ```
 
-### Root Cause
-Window decrease logic was incomplete. Semaphore permits weren't released.
+### Причина
+Логика уменьшения окна была неполной. Семафор permits не освобождались.
 
-### Fix
+### Исправление
 ```rust
 pub fn decrease_window(&self, old_size: u32, new_size: u32) {
     if new_size < old_size {
         let delta = (old_size - new_size) as usize;
-        self.permits.add_permits(delta);  // Release permits back to pool
+        self.permits.add_permits(delta);  // Освободить permits обратно в пул
     }
 }
 
 pub fn increase_window(&self, old_size: u32, new_size: u32) {
     if new_size > old_size {
         let delta = (new_size - old_size) as usize;
-        // Note: Try to acquire; if insufficient permits, that's OK
-        // (backpressure kicks in, sender waits)
+        // Note: Попытка получить; если недостаточно permits, это OK
+        // (backpressure включается, отправитель ждёт)
         let _ = self.permits.try_acquire_many(delta as u32);
     }
 }
 ```
 
-### Testing
+### Тестирование
 ```rust
 #[test]
 fn test_backpressure_permits_released_on_decrease() {
     let window = BackpressureWindow::new(1000);
     
-    // Take 100 permits
+    // Взять 100 permits
     let guard = window.acquire(100).unwrap();
     
-    // Decrease window: should release permits
+    // Уменьшить окно: должны освободиться permits
     window.decrease_window(1000, 900);
     
-    // Now we should be able to acquire more (permits were released)
+    // Теперь должны быть в состоянии получить больше (permits освобождены)
     let _ = window.acquire(50).unwrap();
 }
 ```
 
-### PR Template
-```
-Title: fix: Release semaphore permits when backpressure window decreases
-
-- Add missing permit release in decrease_window()
-- Ensure increase_window() properly acquires permits
-- Add unit tests for window size changes
-- Document backpressure semantics in code comments
-
-Fixes: 6-critical-bugs#3
-```
-
 ---
 
-## Bug #4: GC min_age Parameter Ignored 🟠 HIGH
+## Баг #4: GC параметр min_age игнорируется 🟠 ВЫСОКИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-storage/src/gc.rs`  
-**Severity:** 🟠 HIGH (Correctness)  
-**Impact:** `min_age` flag accepted but never used; GC collects too aggressively  
-**Time Estimate:** 1 hour
+**Файл:** `ipfrs_source/crates/ipfrs-storage/src/gc.rs`  
+**Серьёзность:** 🟠 ВЫСОКИЙ (Корректность)  
+**Влияние:** Флаг `min_age` принимается но никогда не используется; GC собирает слишком агрессивно  
+**Оценка времени:** 1 час
 
-### Current Code
+### Текущий код
 ```rust
 pub struct OrphanGarbageCollector {
     min_age_secs: u64,
@@ -246,7 +221,7 @@ impl OrphanGarbageCollector {
         let mut stats = GcStats::default();
         
         for (cid, block) in self.store.iter() {
-            // BUG: min_age_secs is never checked!
+            // БАГ: min_age_secs никогда не проверяется!
             if block.is_orphan() {
                 self.store.delete(&cid)?;
                 stats.deleted_count += 1;
@@ -257,10 +232,10 @@ impl OrphanGarbageCollector {
 }
 ```
 
-### Root Cause
-Parameter was added but implementation was never completed.
+### Причина
+Параметр был добавлен, но реализация никогда не была завершена.
 
-### Fix
+### Исправление
 ```rust
 pub fn collect(&self) -> Result<GcStats> {
     let mut stats = GcStats::default();
@@ -269,7 +244,7 @@ pub fn collect(&self) -> Result<GcStats> {
     for (cid, block) in self.store.iter() {
         let block_age = block.created_at.elapsed().unwrap_or(Duration::MAX);
         
-        // Check min_age BEFORE deleting
+        // Проверить min_age ПЕРЕД удалением
         if block.is_orphan() && block_age >= Duration::from_secs(self.min_age_secs) {
             self.store.delete(&cid)?;
             stats.deleted_count += 1;
@@ -291,39 +266,16 @@ pub struct GcStats {
 }
 ```
 
-### Testing
-```rust
-#[test]
-fn test_gc_respects_min_age() {
-    let gc = OrphanGarbageCollector::new(store, min_age_secs: 3600);
-    
-    // Add orphan block created now
-    let fresh_orphan = store.add_orphan(data).unwrap();
-    
-    // Add orphan block created 2 hours ago
-    let old_orphan = store.add_orphan_with_age(data, 7200).unwrap();
-    
-    let stats = gc.collect().unwrap();
-    
-    // Fresh orphan should be retained (< 1 hour)
-    assert!(store.has(&fresh_orphan));
-    
-    // Old orphan should be deleted (> 1 hour)
-    assert!(!store.has(&old_orphan));
-    assert_eq!(stats.deleted_count, 1);
-}
-```
-
 ---
 
-## Bug #5: FedAvg Always Times Out 🟡 MEDIUM
+## Баг #5: FedAvg всегда times out 🟡 СРЕДНИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-tensorlogic/src/tensorlogic_ops.rs:1131`  
-**Severity:** 🟡 MEDIUM (Correctness)  
-**Impact:** Federated averaging fails when `min_peers > 0`; distributed training impossible  
-**Time Estimate:** 1.5 hours
+**Файл:** `ipfrs_source/crates/ipfrs-tensorlogic/src/tensorlogic_ops.rs:1131`  
+**Серьёзность:** 🟡 СРЕДНИЙ (Корректность)  
+**Влияние:** Federated averaging падает при `min_peers > 0`; распределённое обучение невозможно  
+**Оценка времени:** 1.5 часа
 
-### Current Code
+### Текущий код
 ```rust
 pub fn federated_average(
     gradients: Vec<Gradient>,
@@ -332,29 +284,29 @@ pub fn federated_average(
 ) -> Result<Gradient> {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     
-    // BUG: Waiting for min_peers, but never actually collecting them!
+    // БАГ: Ожидаем min_peers, но никогда не собираем их!
     while Instant::now() < deadline {
         if gradients.len() >= min_peers {
-            // This condition can never be true because gradients
-            // are passed in; we don't receive more during the loop
+            // Это условие не может быть true, потому что gradients
+            // переданы в; мы не получаем больше во время loop
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     
     if gradients.len() < min_peers {
-        return Err(IpfrsError::FedAvgTimeout);  // Always times out!
+        return Err(IpfrsError::FedAvgTimeout);  // Всегда times out!
     }
     
-    // Average remaining gradients
+    // Усреднить оставшиеся градиенты
     Self::average(&gradients)
 }
 ```
 
-### Root Cause
-Function signature is wrong — it takes `gradients` as input, not as a collecting stream.
+### Причина
+Сигнатура функции неправильная — она берёт `gradients` как input, а не как collecting stream.
 
-### Fix
+### Исправление
 ```rust
 pub async fn federated_average(
     mut gradient_rx: tokio::sync::mpsc::Receiver<Gradient>,
@@ -371,11 +323,11 @@ pub async fn federated_average(
             Ok(Some(grad)) => {
                 collected.push(grad);
                 if collected.len() >= min_peers {
-                    break;  // Collected enough
+                    break;  // Собрали достаточно
                 }
             }
-            Ok(None) => break,  // Channel closed
-            Err(_) => break,    // Timeout reached
+            Ok(None) => break,  // Канал закрыт
+            Err(_) => break,    // Timeout достигнут
         }
     }
     
@@ -390,65 +342,44 @@ pub async fn federated_average(
 }
 ```
 
-### Testing
-```rust
-#[tokio::test]
-async fn test_fedavg_waits_for_min_peers() {
-    let (tx, rx) = tokio::sync::mpsc::channel(10);
-    
-    let avg_task = tokio::spawn(async {
-        federated_average(rx, min_peers: 3, timeout_ms: 5000).await
-    });
-    
-    // Send 3 gradients
-    for i in 0..3 {
-        tx.send(Gradient::new(vec![1.0 + i as f32; 10])).await.unwrap();
-    }
-    drop(tx);
-    
-    let result = avg_task.await.unwrap();
-    assert!(result.is_ok());
-}
-```
-
 ---
 
-## Bug #6: Arrow "Zero-Copy" = 3 Actual Copies 🟡 MEDIUM
+## Баг #6: Arrow "zero-copy" = 3 реальных копии 🟡 СРЕДНИЙ
 
-**File:** `ipfrs_source/crates/ipfrs-interface/src/arrow.rs`  
-**Severity:** 🟡 MEDIUM (Performance)  
-**Impact:** Inefficient memory usage; advertises "zero-copy" but does 3 copies  
-**Time Estimate:** 2 hours
+**Файл:** `ipfrs_source/crates/ipfrs-interface/src/arrow.rs`  
+**Серьёзность:** 🟡 СРЕДНИЙ (Производительность)  
+**Влияние:** Неэффективное использование памяти; рекламируется "zero-copy" но делает 3 копии  
+**Оценка времени:** 2 часа
 
-### Current Code
+### Текущий код
 ```rust
 pub fn serialize_to_arrow_ipc(data: &[f32]) -> Result<Vec<u8>> {
-    // Copy 1: Create array
-    let array = Float32Array::from(data.to_vec());  // ← COPY 1
+    // Копия 1: Создать массив
+    let array = Float32Array::from(data.to_vec());  // ← КОПИЯ 1
     
-    // Copy 2: Wrap in record batch
+    // Копия 2: Обернуть в record batch
     let record = RecordBatch::try_new(schema, vec![Arc::new(array)])?;
     
-    // Copy 3: IPC serialization
+    // Копия 3: IPC сериализация
     let mut writer = ipc::writer::StreamWriter::new(buffer);
-    writer.write(&record)?;  // ← COPY 2 & 3
+    writer.write(&record)?;  // ← КОПИЯ 2 & 3
     
     Ok(buffer.into_inner())
 }
 ```
 
-### Root Cause
-Misunderstanding of Arrow's API. The code wasn't actually zero-copy.
+### Причина
+Неправильное понимание Arrow API. Код не был действительно zero-copy.
 
-### Fix
+### Исправление
 ```rust
 pub fn serialize_to_arrow_ipc(data: &[f32]) -> Result<Vec<u8>> {
-    // Truly zero-copy: use ArrowArray from raw buffer
-    let buffer = Arc::new(data.to_vec());  // Single copy (acceptable)
+    // Действительно zero-copy: использовать ArrowArray из raw buffer
+    let buffer = Arc::new(data.to_vec());  // Одна копия (приемлемо)
     let array = Float32Array::new(
         DataType::Float32,
         buffer.len(),
-        buffer,  // No additional copy
+        buffer,  // Без дополнительной копии
         None,
         0,
     );
@@ -462,7 +393,7 @@ pub fn serialize_to_arrow_ipc(data: &[f32]) -> Result<Vec<u8>> {
     Ok(writer.into_inner())
 }
 
-// Benchmark proof
+// Доказательство бенчмарком
 #[bench]
 fn bench_arrow_serialize(b: &mut Bencher) {
     let data = vec![1.0; 1_000_000];
@@ -470,18 +401,18 @@ fn bench_arrow_serialize(b: &mut Bencher) {
 }
 ```
 
-### Documentation Update
+### Обновление документации
 ```rust
-/// Serialize tensor to Arrow IPC format.
+/// Сериализовать тензор в Arrow IPC формат.
 ///
-/// # Performance
-/// - Single allocation: input data → Vec
-/// - Arrow wraps buffer without additional copies
-/// - Actual copy count: 1 (input serialization)
+/// # Производительность
+/// - Одна аллокация: входные данные → Vec
+/// - Arrow оборачивает буфер без дополнительных копий
+/// - Реальное количество копий: 1 (входная сериализация)
 ///
-/// # Note
-/// Previously advertised as "zero-copy" but performed 3 copies.
-/// Now truly optimized for memory efficiency.
+/// # Примечание
+/// Ранее рекламировалось как "zero-copy" но выполняло 3 копии.
+/// Теперь действительно оптимизировано для эффективности памяти.
 pub fn serialize_to_arrow_ipc(data: &[f32]) -> Result<Vec<u8>> {
     // ...
 }
@@ -489,32 +420,32 @@ pub fn serialize_to_arrow_ipc(data: &[f32]) -> Result<Vec<u8>> {
 
 ---
 
-## Summary Table
+## Таблица резюме
 
-| # | Bug | File | Severity | Time | Status |
-|---|-----|------|----------|------|--------|
+| # | Баг | Файл | Серьёзность | Время | Статус |
+|---|-----|------|-------------|-------|--------|
 | 1 | JWT MD5 | auth.rs:449 | 🔴 CRITICAL | 30m | ⬜ |
 | 2 | TLS stub | tls.rs:314 | 🔴 CRITICAL | 1h | ⬜ |
 | 3 | Backpressure | backpressure.rs:182 | 🟠 HIGH | 45m | ⬜ |
 | 4 | GC min_age | gc.rs | 🟠 HIGH | 1h | ⬜ |
 | 5 | FedAvg timeout | tensorlogic_ops.rs:1131 | 🟡 MEDIUM | 1.5h | ⬜ |
 | 6 | Arrow copies | arrow.rs | 🟡 MEDIUM | 2h | ⬜ |
-| | **TOTAL** | | | **7h** | |
+| | **ИТОГО** | | | **7h** | |
 
 ---
 
-## Execution Plan
+## План исполнения
 
-**Week 1 (Days 1-5):**
-- Day 1-2: Bugs #1, #2 (both critical)
-- Day 3: Bug #3 (backpressure)
-- Day 4: Bug #4 (GC)
-- Day 5: Code review, test, commit
+**Неделя 1 (Дни 1-5):**
+- День 1-2: Баги #1, #2 (оба критические)
+- День 3: Баг #3 (backpressure)
+- День 4: Баг #4 (GC)
+- День 5: Code review, тесты, коммит
 
-**Week 2 (Days 6-7):**
-- Day 6: Bugs #5, #6 (performance/distributed)
-- Day 7: Final review, v0.2.1 release prep
+**Неделя 2 (Дни 6-7):**
+- День 6: Баги #5, #6 (производительность/распределённые)
+- День 7: Финальный review, подготовка к v0.2.1 релизу
 
 ---
 
-**See Also:** [02-Stabilization.md](02-Stabilization.md) for testing & release steps.
+**Смотри также:** [02-Stabilization.md](02-Stabilization.md) для шагов тестирования и релиза.

@@ -1,92 +1,92 @@
 ---
-title: IPFRS Development RoadMap
-summary: Strategic roadmap for yunusovt983-art/ipfrs-ai fork — stabilization, community building, features
-tags: [roadmap, strategy, timeline, milestones]
+title: Дорожная карта разработки IPFRS
+summary: Стратегический план для форка yunusovt983-art/ipfrs-ai — стабилизация, комьюнити, фичи
+tags: [roadmap, стратегия, timeline, milestones]
 updated: 2026-06-19
 ---
 
-# IPFRS Development RoadMap
+# Дорожная карта разработки IPFRS
 
-> Strategic plan for `yunusovt983-art/ipfrs-ai` fork based on Apache 2.0 codebase analysis.
+> Стратегический план для форка `yunusovt983-art/ipfrs-ai` на базе анализа кодовой базы Apache 2.0.
 
-## Quick Overview
+## Краткий обзор
 
 ```
-📊 Project Status: v0.2.0 "Network Release" (Production Ready)
-🎯 Fork Goal: Stabilize, document, extend, contribute upstream
-👥 Team: You + community PRs
-⏱️  Timeline: 5-8 weeks intensive, then ongoing maintenance
+📊 Статус проекта: v0.2.0 "Network Release" (Production Ready)
+🎯 Цель форка: Стабилизация, документация, расширение, контриб upstream
+👥 Команда: Вы + community PR'ы
+⏱️  Таймлайн: 5-8 недель интенсива, потом поддержка
 ```
 
-## Navigation
+## Навигация
 
-1. **[01-Critical-Bugs.md](01-Critical-Bugs.md)** — Fix 6 security/correctness issues (Weeks 1-2)
-2. **[02-Stabilization.md](02-Stabilization.md)** — v0.2.1 patch release, enable CI/CD (Weeks 1-2)
-3. **[03-Community-Docs.md](03-Community-Docs.md)** — Finish book, tutorials, policies (Weeks 3-4)
-4. **[04-Features.md](04-Features.md)** — Choose 1-2 major features for v0.3.0 support (Weeks 5+)
-5. **[05-Upstream-Contribution.md](05-Upstream-Contribution.md)** — How to push upstream (ongoing)
-6. **[TIMELINE.md](TIMELINE.md)** — Week-by-week execution plan
+1. **[01-Critical-Bugs.md](01-Critical-Bugs.md)** — Зафиксить 6 критических багов (Неделя 1-2)
+2. **[02-Stabilization.md](02-Stabilization.md)** — v0.2.1 релиз, CI/CD (Неделя 1-2)
+3. **[03-Community-Docs.md](03-Community-Docs.md)** — Завершить книгу, туториалы, политики (Неделя 3-4)
+4. **[04-Features.md](04-Features.md)** — Выбрать 1-2 фичи для v0.3.0 (Неделя 5+)
+5. **[05-Upstream-Contribution.md](05-Upstream-Contribution.md)** — Как контрибьютить upstream (ongoing)
+6. **[TIMELINE.md](TIMELINE.md)** — Неделя-за-неделей план
 
 ---
 
-## Key Metrics
+## Ключевые метрики
 
-| Metric | Target | Status |
-|--------|--------|--------|
-| Critical bugs fixed | 6 / 6 | ⬜ Not started |
-| v0.2.1 release | ✅ | ⬜ Not started |
-| CI/CD enabled | ✅ | ⬜ Not started |
-| Book chapters | 8 / 8 | ⬜ In progress |
-| GitHub Discussions | ✅ | ⬜ Not started |
-| Security policy | ✅ SECURITY.md | ⬜ Not started |
-| Community contrib guide | ✅ CONTRIBUTING.md | ⬜ Not started |
-| Upstream PRs | 3+ | ⬜ Not started |
+| Метрика | Целевое значение | Статус |
+|---------|-----------------|--------|
+| Критические баги зафиксены | 6 / 6 | ⬜ Не начато |
+| v0.2.1 релиз | ✅ | ⬜ Не начато |
+| CI/CD включен | ✅ | ⬜ Не начато |
+| Главы книги | 8 / 8 | ⬜ In progress |
+| GitHub Discussions | ✅ | ⬜ Не начато |
+| Политика безопасности | ✅ SECURITY.md | ⬜ Не начато |
+| Гайд для контрибьюторов | ✅ CONTRIBUTING.md | ⬜ Не начато |
+| Upstream PR'ы | 3+ | ⬜ Не начато |
 
 ---
 
-## 🚀 Quick Start (Day 1)
+## 🚀 Быстрый старт (День 1)
 
 ```bash
 cd /Volumes/Kingston/cool-japan
 
-# 1. Create tracking issues
-gh issue create -t "Bug: JWT uses MD5 instead of HS256" -b "See RoadMap/01-Critical-Bugs.md"
-gh issue create -t "Chore: Enable CI/CD pipeline" -b "See RoadMap/02-Stabilization.md"
-gh issue create -t "Docs: Finish mdbook chapters" -b "See RoadMap/03-Community-Docs.md"
+# 1. Создать tracking issues
+gh issue create -t "Баг: JWT использует MD5 вместо HS256" -b "See RoadMap/01-Critical-Bugs.md"
+gh issue create -t "Chore: Включить CI/CD pipeline" -b "See RoadMap/02-Stabilization.md"
+gh issue create -t "Docs: Завершить главы mdbook" -b "See RoadMap/03-Community-Docs.md"
 
-# 2. Start bug fixes (Week 1)
+# 2. Начать фиксить баги (Неделя 1)
 git checkout -b fix/jwt-md5-auth
-# Fix interface/src/auth.rs:449
-# ... commit ...
+# Исправить interface/src/auth.rs:449
+# ... коммит ...
 git push -u origin fix/jwt-md5-auth
-gh pr create --title "fix: Replace JWT MD5 with HS256" --body "Closes #1"
+gh pr create --title "fix: Заменить JWT MD5 на HS256" --body "Closes #1"
 
-# 3. Track progress
-# Update TIMELINE.md weekly
+# 3. Отслеживать прогресс
+# Обновить TIMELINE.md еженедельно
 ```
 
 ---
 
-## License & Attribution
+## Лицензия и авторство
 
 - **Upstream:** [cool-japan/ipfrs](https://github.com/cool-japan/ipfrs) — Apache 2.0
 - **Fork:** [yunusovt983-art/ipfrs-ai](https://github.com/yunusovt983-art/ipfrs-ai) — Apache 2.0
-- **Authors:** TensorLogic Architect (original) + Community (this fork)
+- **Авторы:** TensorLogic Architect (оригинал) + Community (этот форк)
 
-**Note:** All PRs to this fork should be upstreamed to original project where possible.
-
----
-
-## Decision Log
-
-| Date | Decision | Rationale |
-|------|----------|-----------|
-| 2026-06-19 | Start with bug fixes, not new features | Unblocks v0.2.1 release, builds community trust |
-| 2026-06-19 | Fork under Apache 2.0 | Maintain license compatibility, enable upstream PRs |
-| 2026-06-19 | Archive other Wiki variants | Keep Wiki_Arch_Claude as source of truth (gitignore others) |
-| 2026-06-19 | Prioritize CI/CD | Prevents regression, enables safe refactoring |
+**Примечание:** Все PR'ы к этому форку должны быть отправлены upstream в оригинальный проект где возможно.
 
 ---
 
-**Last Updated:** 2026-06-19  
-**Next Review:** 2026-06-26 (Week 1 checkpoint)
+## Лог решений
+
+| Дата | Решение | Причина |
+|------|---------|---------|
+| 2026-06-19 | Начать с багов, не фич | Разблокирует v0.2.1, строит доверие комьюнити |
+| 2026-06-19 | Fork под Apache 2.0 | Совместимость лицензии, включает upstream PR'ы |
+| 2026-06-19 | Архивировать другие Wiki | Оставить Wiki_Arch_Claude источником истины |
+| 2026-06-19 | Приоритизировать CI/CD | Предотвращает регрессии, включает safe refactoring |
+
+---
+
+**Последнее обновление:** 2026-06-19  
+**Следующий обзор:** 2026-06-26 (чекпоинт Неделя 1)
