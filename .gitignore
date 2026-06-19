@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+.cursor/
+
+# Project-specific
+.obsidian/
+
+# Experimental wikis (different LLM models)
+Wiki_Arch_DeepSeek/
+Wiki_Arch_MiniMax/
+Wiki_Arch_Qwen/
+Wiki_GLM/
+
+# Build artifacts
+target/
+dist/
+build/
+
+# Cargo
+Cargo.lock
+**/*.rs.bk
+
+# Node
+node_modules/
+npm-debug.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Environment
+.env
+.env.local

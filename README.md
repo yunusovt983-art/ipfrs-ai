@@ -319,7 +319,8 @@ graph TD
 > **702,768 lines** total including workspace root files.  
 > **504,850 lines** of actual code (excluding blank lines and comments).  
 > **724 files** contain `#[cfg(test)]` — extensive inline test coverage.  
-> **~193 external dependencies** across 15 `Cargo.toml` files.
+> **~193 external dependencies** across 15 `Cargo.toml` files.  
+> **Location**: `ipfrs_source/` (moved from `Vendor/ipfrs`)
 
 ---
 
@@ -368,8 +369,10 @@ graph TD
 
 ## Documentation
 
+### Wiki Structure
+
 ```
-Wiki/
+Wiki/ (or Wiki_Arch_Claude/)
 ├── 01-Overview.md          — What is IPFRS?
 ├── 02-ArchitectureStack.md — 6-layer stack
 ├── 03-BoundedContexts.md   — 5 bounded contexts (DDD)
@@ -386,6 +389,13 @@ Wiki/
 ├── 14-HLD.md               — Helicopter view (ASCII)
 └── 15-HLD-Mermaid.md       — Helicopter view (Mermaid)
 ```
+
+### Source Code
+
+- **`ipfrs_source/`** — Complete IPFRS codebase (moved to root)
+  - `crates/` — 12 Rust crates (storage, network, semantic, tensorlogic, etc.)
+  - `Cargo.toml` — Workspace configuration
+  - `ARCHITECTURE_*.md` — Original architecture docs
 
 ---
 
