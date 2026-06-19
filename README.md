@@ -316,11 +316,12 @@ graph TD
 | `ipfrs-python` | 1 | 590 |
 | **Total** | **1,005** | **699,852** |
 
-> **702,768 lines** total including workspace root files.  
-> **504,850 lines** of actual code (excluding blank lines and comments).  
+> **699,852 lines** of Rust across **1,005 files** in 12 crates (excluding build artifacts).  
 > **724 files** contain `#[cfg(test)]` — extensive inline test coverage.  
 > **~193 external dependencies** across 15 `Cargo.toml` files.  
-> **Location**: `ipfrs_source/` (moved from `Vendor/ipfrs`)
+> **54,466 lines** of Markdown documentation (architecture wikis, RoadMap, guides).  
+> **Location**: `ipfrs_source/` (moved from `Vendor/ipfrs`)  
+> _Recounted 2026-06-19 — figures verified against the working tree._
 
 ---
 
