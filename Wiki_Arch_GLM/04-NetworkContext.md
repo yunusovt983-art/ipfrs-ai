@@ -65,6 +65,65 @@ Network Context отвечает за **peer identity, discovery, reputation, DH
 
 ---
 
+## 1bis. Глубокое погружение по коду (выверено 2026-06-19)
+
+> Точные `file:line`-якоря и исправление расхождений по реальному коду `ipfrs-network`.
+> Подсекции 2–15 ниже остаются концептуальными.
+
+### 1bis.1 Главный факт: Tier A vs Tier B
+
+⚠️ Крейт состоит из **двух тиров, которые почти не соприкасаются**:
+- **Tier A — живое ядро**: `NetworkNode` (`node.rs:404`) + `libp2p::Swarm`. `node.rs` импортирует
+  из `crate::` **по сути только `gossipsub`** (`node.rs:428,518`). `ConnectionManager`, `PeerStore`,
+  `BootstrapManager`, `ban_list`, `routing_table_manager` в `node.rs` **не упоминаются вообще**.
+- **Tier B — ~150 модулей** (репутация, бан-листы, пулы, маршрутизация) — изолированы, **не
+  получают событий swarm**.
+- **`NetworkFacade`** (`facade.rs:93`) со-локализует `NetworkNode` + ровно **17 подсистем**
+  (14 `Option<Arc<RwLock>>` + 3 всегда-доступных), но ⚠️ **ни одно `NetworkEvent` им не доставляется**
+  (в `facade.rs` нет обработки `event_rx`). Это и есть разрыв Tier A/Tier B.
+
+### 1bis.2 NetworkNode + IpfrsBehaviour
+
+- **`NetworkNode`** (`node.rs:404`): ⚠️ **нет поля `peer_store`** (он живёт только в `NetworkFacade`,
+  `facade.rs:114`); канал событий — **bounded `mpsc::channel(1024)`** (`node.rs:511`), не unbounded.
+- **`IpfrsBehaviour`** (`node.rs:288`) — ровно **7 behaviour'ов**: `kademlia, identify, ping, autonat,
+  dcutr, mdns, relay_client`. ⚠️ **Ни `gossipsub`, ни `bitswap`** как libp2p-behaviour нет → pub/sub и
+  обмен блоками не интегрированы в swarm.
+
+### 1bis.3 Что реально работает, а что заглушка
+
+- ✅ **DHT content-routing** — живой путь: `provide` → `kademlia.start_providing` (`node.rs:1200`),
+  `find_providers` → `get_providers` (`node.rs:1246`), результат через `provider_waiters`.
+  ⚠️ Ключ ожидания строится `String::from_utf8_lossy(&cid.to_bytes())` (`node.rs:864,1234`) — бинарные
+  байты CID не UTF-8 → хрупко.
+- ⚠️ **Выкачка блоков — заглушка**: `fetch_block_from_peer` → `Error::NotFound("...pending Task E")`
+  (`node.rs:1314`). `bitswap.rs::Bitswap` — in-process структура, не libp2p-behaviour.
+- ⚠️ **Gossipsub — только in-process router** (`GossipSubManager`, `gossipsub.rs:280`); нет
+  `libp2p::gossipsub::Behaviour`; `validate_message` → **всегда `true`** (`gossipsub.rs:468`).
+- ⚠️ **`KademliaDhtProvider`** (`dht_provider.rs:367`) — **все методы заглушены** (provide → `Ok(())`,
+  find_providers → пустой результат). Не связан с реальным Kademlia в `node.rs`.
+
+### 1bis.4 Репутация и события — корректировки
+
+- ⚠️ **4 независимые модели репутации**: `peer.rs` (`u8` 0–100), `reputation.rs` (EWMA
+  `ReputationManager`), `peer_reputation_graph.rs` (граф доверия), `peer_reputation.rs` (`f64` [0,1]).
+  Параметры графа **подтверждены**: depth=3, damping=0.5, веса 0.6/0.4, decay=0.99, prune=0.01
+  (`peer_reputation_graph.rs:178`). ⚠️ `reputation.rs::apply_decay` (`:272`) — **без `.clamp()`**
+  (остальные клампят).
+- **`NetworkEvent`** (`node.rs:448`): `PeerConnected/PeerDisconnected/ContentFound{cid,providers}/
+  PeerDiscovered/ListeningOn/ConnectionError/DhtBootstrapCompleted/NatStatusChanged`. ⚠️ Вариантов
+  `DhtQueryCompleted{query_id}` и `GossipsubMessage` **нет**.
+
+### 1bis.5 Транспорт
+
+`build_swarm` (`node.rs:599`): **QUIC (`quic-v1`) + TCP + relay-client**, аутентификация **Noise**,
+мультиплексирование **Yamux**; idle timeout **60 c** (`:723`); identify `"/ipfrs/1.0.0"` (`:671`);
+ping **15 c** (`:677`); Kademlia `set_mode(Server)` + `bootstrap()` на старте. ⚠️ Зависит от
+**`ipfrs-tensorlogic`** — для распределённого вывода поверх gossip-router (`InferenceWaiters`,
+`node.rs:32,1529`). Полный реестр заглушек: `[[../Wiki/11-RealityCheck]]`.
+
+---
+
 ## 2. NetworkNode — libp2p Swarm Wrapper
 
 ### 2.1 Structure

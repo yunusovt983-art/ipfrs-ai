@@ -66,6 +66,60 @@ Storage Context отвечает за **durable, content-addressed block persist
 
 ---
 
+## 1bis. Глубокое погружение по коду (выверено 2026-06-19)
+
+> Точные `file:line`-якоря и подтверждение/исправление ключевых утверждений по
+> реальному коду `ipfrs-storage`. Подсекции 2–16 ниже остаются концептуальными.
+
+### 1bis.1 Порт и базовый адаптер
+
+- **`BlockStore`** (`traits.rs:9`) — 11 методов (без дефолта: `put/get/has/delete/list_cids/len`;
+  с дефолтом: `*_many`, `is_empty`, `flush`, `close`). ✅ **Есть blanket-impl для `Arc<S>`**
+  (`traits.rs:86`) — это и делает стек декораторов композируемым.
+- **`SledBlockStore`** (`blockstore.rs:178`) — реальные поля ровно
+  `{ db, dedup_stats, compaction_scheduler }`; ⚠️ полей `tree`/`cache`/`config` **нет**.
+  - `put` (`blockstore.rs:314`): ✅ **дедуп** — `db.contains_key` перед вставкой; при наличии
+    выходит **без записи и без flush**.
+  - `get` (`blockstore.rs:344`): ⚠️ `Block::from_parts(*cid, data)` **БЕЗ `verify()`** — целостность
+    при чтении не проверяется.
+  - `flush_async` — на `put` только при реальной записи, на `delete` всегда.
+
+### 1bis.2 Декораторы — реальный стек
+
+- **Реальный дефолтный стек** (`helpers.rs:21`): `type FullStack = BloomBlockStore<CachedBlockStore<SledBlockStore>>`
+  → **Bloom → Cache → Sled** (Bloom самый внешний, короткозамыкает на отрицании фильтра).
+- ⚠️ **`CircuitBreaker` — standalone-утилита, НЕ декоратор** (`circuit_breaker.rs:86`, нет `impl BlockStore`).
+- **`CachedBlockStore`** (`cache.rs:145`): внутри **`Mutex<LruCache<String, Bytes>>`** (parking_lot),
+  write-through + size-gated admission (порог 256 KiB) — **не** `DashMap+VecDeque`.
+- ⚠️ **`BlockStoreSharding` НЕ является `BlockStore`** (`blockstore_sharding.rs:168`) — это автономный
+  `Vec<HashMap<String, BlockRecord>>`; шард = `fnv1a_64(cid) % num_shards`.
+
+### 1bis.3 Пины и сборка мусора
+
+- **`PinInfo.ref_count` = `u32`** (`pinning.rs:38`, не u64); типы `Direct/Recursive/Indirect`;
+  `PinManager` — in-memory `DashMap` + файловая сериализация.
+- ⚠️ **≥5 независимых GC**: `gc::GarbageCollector` (**нет** поля `min_age`), `gc::OrphanGarbageCollector`
+  (поле `min_age_secs=3600` объявлено, но **не используется — мёртвый код/баг**),
+  `block_garbage_collector::BlockGarbageCollector` (**реально применяет** `min_age_secs=300`,
+  `:604`), `garbage_collector::StorageGarbageCollector` (реестр), `gc_planner`. Итог: возрастной
+  порог enforced **только** в `block_garbage_collector`.
+
+### 1bis.4 Тиринг, целостность, WAL
+
+- **Тиринг**: единственный реальный декоратор — `TieredStore<H,C>` (`tiering.rs:515`); уровни
+  ⚠️ `Hot/Warm/Cold/`**`Archive`** (не `Frozen`). ≥6 параллельных tiering-подсистем (не `BlockStore`).
+  ⚠️ **Сфабрикованная метрика**: «compression ratio» = `0.30 + (cid_hash % 61)*0.01` (`cold_storage.rs:378`).
+- ⚠️ **Целостность**: **ни один** чекер не пересчитывает настоящий multihash-CID — все на FNV-1a
+  (`integrity_checker` даже «симулирует» CID как `"bafy"+fnv1a`, `:170`). Проверка на пути чтения
+  по умолчанию **отключена**.
+- ⚠️ **WAL/Raft не подключены к `SledBlockStore`** (`wal.rs`, `write_ahead_log.rs`, `raft.rs` —
+  standalone; Sled использует свой внутренний WAL).
+- ⚠️ **Чужеродный домену код в крейте хранения**: Raft-консенсус (`raft.rs`), мульти-ДЦ
+  (`datacenter.rs`), tensor-VCS «Git для тензоров» (`vcs.rs`, `gradient.rs`) — кандидаты на
+  выделение в отдельные контексты. Полный реестр: `[[../Wiki/11-RealityCheck]]`.
+
+---
+
 ## 2. The Port — BlockStore Trait
 
 ### 2.1 Definition
