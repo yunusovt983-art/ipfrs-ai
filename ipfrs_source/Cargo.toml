@@ -18,8 +18,8 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-authors = ["TensorLogic Architect"]
-license = "Apache-2.0"
+authors = ["TensorLogic Architect", "Temur <rsut.istio@gmail.com>"]
+license = "AGPL-3.0"
 repository = "https://github.com/cool-japan/ipfrs"
 homepage = "https://github.com/cool-japan/ipfrs"
 rust-version = "1.90"

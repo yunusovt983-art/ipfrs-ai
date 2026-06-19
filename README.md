@@ -1,7 +1,13 @@
+<p align="center">
+  <img src="assets/ipfrs-banner.png" alt="IPFRS — Planetary-Scale Distributed Brain for AI" width="100%">
+</p>
+
 # IPFRS — Inter-Planetary File Rust System
 
 > Распределённая контент-адресуемая файловая система, объединяющая хранение с ML-интеллектом.  
 > Файлы идентифицируются по хешу содержимого (CID). Каждый блок — сам себе адрес.
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 
 ---
 
@@ -428,6 +434,30 @@ Wiki_Arch_GLM/              — GLM-вариант DDD-анализа (13 фай
   - `crates/` — 12 Rust-крейтов (storage, network, semantic, tensorlogic и др.)
   - `Cargo.toml` — конфигурация workspace
   - `book/`, `CRATE_DOCS.md` — документация исходников
+
+---
+
+## Контрибьюторы
+
+| Контрибьютор | E-mail | Роль |
+|--------------|--------|------|
+| Temur | rsut.istio@gmail.com | Maintainer · архитектура · документация |
+
+Полный список — в [CONTRIBUTORS.md](CONTRIBUTORS.md). Вклад приветствуется — открывайте
+issue или pull request.
+
+---
+
+## Лицензия
+
+Этот проект распространяется под лицензией **GNU Affero General Public License v3.0
+(AGPL-3.0)** — см. файл [LICENSE](LICENSE).
+
+> **Примечание о происхождении.** IPFRS — форк [cool-japan/ipfrs](https://github.com/cool-japan/ipfrs),
+> исходно под лицензией Apache-2.0. Объединённая работа в этом репозитории лицензируется
+> под AGPL-3.0; атрибуция и условия Apache-2.0 для исходных частей сохраняются
+> (см. заголовки файлов в `ipfrs_source/`). AGPL-3.0 требует раскрытия исходного кода
+> при предоставлении доступа к ПО по сети.
 
 ---
 
