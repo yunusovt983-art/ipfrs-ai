@@ -13,6 +13,15 @@ updated: 2026-06-18
 
 **Краткое резюме**: Network Domain управляет peer-to-peer сетью. Его задача: "Кто имеет данные и где они находятся?" Использует Kademlia DHT для распределённого поиска.
 
+> **🔎 Уточнение по коду (2026-06-19).** Контекст состоит из **двух тиров**: Tier A —
+> живое ядро `NetworkNode` + `libp2p::Swarm` (Kademlia DHT, QUIC/TCP, NAT — работают); Tier B —
+> ~180 модулей (репутация, бан-листы, пулы), ⚠️ **почти не подключённых к событиям swarm**.
+> `IpfrsBehaviour` содержит **7 behaviour'ов** — **без** `gossipsub` и `bitswap` (вопреки старым
+> диаграммам). Network находит провайдеров через DHT, но ⚠️ **выкачка блоков по swarm — заглушка**
+> (`fetch_block_from_peer` → `NotFound`, `node.rs:1311`); реальную выкачку делает Transport-домен.
+> `KademliaDhtProvider` — все методы заглушены (`dht_provider.rs:388`); gossipsub только in-process.
+> Детали: `[[12-RealityCheck]]`, `[[../Wiki/05-NetworkContext]]`.
+
 ---
 
 ## Язык домена

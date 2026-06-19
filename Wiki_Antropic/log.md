@@ -14,6 +14,18 @@ updated: 2026-06-18
 
 ---
 
+## [2026-06-19] ingest | Глубокое исследование 7 контекстов + проверка реальности
+- Проведён глубокий параллельный анализ всех 7 bounded contexts (7 агентов, привязка `file:line`)
+- Создан [[12-RealityCheck]] — реестр заглушек, опровергнутые security-«баги», техдолг
+- Расширен [[07-LogicDomain]]: добавлен полный каталог **20+ движков вывода** (было 2)
+- Добавлены корректирующие блоки «🔎 Уточнение по коду» в [[03-BoundedContexts]], [[04-StorageDomain]],
+  [[05-NetworkDomain]], [[06-SemanticDomain]], [[08-TransportDomain]] (расхождения модели с кодом)
+- Ключевые находки: JWT=HS256 (не MD5), backpressure корректен, Bitswap дублирован в 2 крейтах,
+  Network→Transport выкачка блоков по swarm — заглушка, `VectorIndex::rebuild` ломает индекс
+- Создана соседняя база `[[../Wiki/00-INDEX|Wiki «Как функционирует IPFRS»]]` (13 файлов, DDD)
+- Обновлён [[INDEX]]: 16 статей
+- источник: ipfrs_source/crates/**
+
 ## [2026-06-18] ingest | HLD Mermaid — диаграммы архитектуры
 - Создан [[15-HLD-Mermaid]] — 15 Mermaid-диаграмм: C4 контекст, CID-токен, карта контекстов, стек декораторов
 - 4 sequence diagram'а (ADD/GET/SEARCH/QUERY), stateDiagram Transport, mindmap NFR

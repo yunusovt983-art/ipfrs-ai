@@ -13,6 +13,17 @@ updated: 2026-06-18
 
 **Краткое резюме**: Transport Domain отвечает на вопрос "Как обмениваться блоками надёжно?" Использует Bitswap протокол с приоритетными очередями и peer scoring.
 
+> **🔎 Уточнение по коду (2026-06-19).** ⚠️ **Bitswap реализован дважды** — здесь
+> (`BitswapExchange<S>`, приоритетная куча, `PeerId=String`) и в `ipfrs-network`
+> (`Bitswap`, `HashSet<Cid>`, `libp2p::PeerId`) — **несовместимо** (разные типы и сообщения).
+> В этом крейте **нет** `WantHave`/различия want-have-vs-want-block и **нет** `PeerLedger`/
+> «fair-leeching» (вопреки старым диаграммам). Состояние `Completing` объявлено, но не
+> присваивается. ⚠️ Заглушки: GraphSync (`extract_links` → пусто, обходит только корень,
+> `graphsync.rs:377`), erasure (XOR, не Reed-Solomon, `erasure.rs:299`), NAT/STUN/TURN
+> (симуляция). ✅ Наиболее завершён **TensorSwap** (стриминг, einsum-граф, safetensors,
+> градиенты). «Баг backpressure-семафора» — не здесь, а в `ipfrs-interface`, и уже исправлен.
+> Детали: `[[12-RealityCheck]]`, `[[../Wiki/08-TransportContext]]`.
+
 ---
 
 ## Язык домена

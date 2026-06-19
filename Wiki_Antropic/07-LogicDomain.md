@@ -210,6 +210,47 @@ Solutions: {X = bob}, {X = charlie}
 
 ---
 
+## Полный каталог движков вывода (20+)
+
+> **Обновление 2026-06-19 (глубокое исследование).** Ранее эта страница описывала
+> только backward chaining + neural-symbolic. На деле `ipfrs-tensorlogic` содержит
+> **20+ движков вывода** — это крупнейшая уникальная ценность IPFRS (Core Domain).
+> Каждый ниже подтверждён в коде. Полный разбор — `[[../Wiki/07-TensorLogicContext]]`.
+
+| # | Движок | Что вычисляет | Источник |
+|---|--------|---------------|----------|
+| 1 | **SLD backward chaining** | целенаправленная резолюция + унификация + детект циклов | `reasoning.rs:259,555` |
+| 2 | Memoized SLD | SLD с мемоизацией подцелей | `reasoning.rs:632` |
+| 3 | **Tabling / SLG** | табличная резолюция, детект петель в рекурсии | `recursive_reasoning.rs:101` |
+| 4 | Stratified fixpoint (Datalog) | bottom-up итерация до сходимости | `recursive_reasoning.rs:312` |
+| 5 | **Distributed backward chaining** | локальные факты → правила → делегирование пирам по CID | `distributed_backward_chainer.rs:66` |
+| 6 | **Temporal (Allen)** | 13 интервальных отношений Аллена | `temporal_reasoning.rs:100` |
+| 7 | **Fuzzy logic** | Mamdani/Sugeno, дефаззификация Centroid/MoM/LoM | `fuzzy_logic.rs:325` |
+| 8 | Fuzzy (полный Mamdani) | деревья антецедентов, 7 MF, 5 методов | `fuzzy_logic_engine/` |
+| 9 | **Epistemic S5 (Kripke)** | model-checking над Крипке; общее знание через fixpoint | `epistemic_logic.rs:210` |
+| 10 | **PLN** | truth values `(strength, confidence)`, 8 правил | `probabilistic_logic_network.rs:483` |
+| 11 | **Bayesian network** | variable elimination / belief propagation / sampling | `bayesian_network_inference.rs:575` |
+| 12 | Bayesian updater | сопряжённые приоры (Beta-Bernoulli, Gauss, Dirichlet, Gamma) | `bayesian_updater.rs` |
+| 13 | **Abductive** | branch-and-bound по гипотезам, минимизация стоимости | `abductive_reasoning_engine.rs:392` |
+| 14 | **Causal (do-calculus)** | do-исчисление Пёрла над SCM; контрфактика | `causal_inference.rs:244` |
+| 15 | **Constraint solver (CSP)** | AC-3 + backtracking + MRV | `constraint_solver.rs:322` |
+| 16 | **Belief revision (AGM)** | expansion/contraction/Levi-revision | `belief_revision_engine.rs:336` |
+| 17 | Constraint propagation | сужение доменов | `constraint_propagation_engine.rs` |
+| 18 | **MDP** | value/policy iteration (Беллман) | `markov_decision_process/` |
+| 19 | **RL agent** | SARSA/Q-Learning/Double-Q/N-step; ε-greedy/UCB | `reinforcement_learning_agent.rs:52` |
+| 20 | RL (alt tabular) | вторая табличная реализация | `reinforcement_learner.rs` |
+| 21 | Hypothesis testing | chi²/t-test | `hypothesis_test_engine.rs` |
+| 22 | Probabilistic program | байесовский sampling апостериори | `probabilistic_program_engine.rs` |
+| 23 | **Neural-symbolic** | гибридная смесь (см. ниже) | `neural_symbolic.rs:474` |
+| 24 | Decision-tree learner | ID3/C4.5 | `decision_tree_learner.rs` |
+| 25 | Ensemble learner | Bagging/AdaBoost/RandomForest/Stacking | `ensemble_learner.rs` |
+
+> ⚠️ Нет единого `trait InferenceEngine`, который реализуют все движки;
+> `reasoning::InferenceEngine` — конкретная структура. Это технический долг
+> (дублирование примитивов: несколько PRNG, 2 RL, 2 fuzzy). См. `[[12-RealityCheck]]`.
+
+---
+
 ## Neural-Symbolic Fusion
 
 **Distinctive feature** of IPFRS (NOT in traditional Prolog):
