@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "aed18a85753695c1",
+    "type": "split",
+    "children": [
+      {
+        "id": "562078e3f8356714",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "24c78b08e694477b",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "Wiki/WIKI_SCHEMA.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "WIKI_SCHEMA"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "5ab33dc718f89bdf",
+    "type": "split",
+    "children": [
+      {
+        "id": "93a3952eaf2df812",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "44df3522cb9b493a",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Файловый менеджер"
+            }
+          },
+          {
+            "id": "551c1560e5825ee0",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Поиск"
+            }
+          },
+          {
+            "id": "e05909a7fb8421fc",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Закладки"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "df266a100e04dbfb",
+    "type": "split",
+    "children": [
+      {
+        "id": "dd5cefaa10ba3045",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "097b3df37b70a420",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "Wiki/15-HLD-Mermaid.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Обратные ссылки для 15-HLD-Mermaid"
+            }
+          },
+          {
+            "id": "6c24ae03cbf3aa89",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "Wiki/15-HLD-Mermaid.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Исходящие ссылки из 15-HLD-Mermaid"
+            }
+          },
+          {
+            "id": "d966055bb1d0132a",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Теги"
+            }
+          },
+          {
+            "id": "17dff2fbe763e8ff",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Все свойства"
+            }
+          },
+          {
+            "id": "e9ba9f030828d438",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "Wiki/15-HLD-Mermaid.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Структура 15-HLD-Mermaid"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Меню быстрого перехода": false,
+      "graph:Граф": false,
+      "canvas:Создать новый холст": false,
+      "daily-notes:Сегодняшняя заметка": false,
+      "templates:Вставить шаблон": false,
+      "command-palette:Открыть палитру команд": false,
+      "bases:Создать новую базу": false
+    }
+  },
+  "active": "24c78b08e694477b",
+  "lastOpenFiles": [
+    "Wiki/01-Overview.md",
+    "Wiki/15-HLD-Mermaid.md",
+    "README.md",
+    "Wiki/14-HLD.md",
+    "Wiki/09-DataFlows.md",
+    "Wiki/10-Performance.md",
+    "Wiki/15-HLD-Mermaid.md.tmp.12510.9782d9d6f398",
+    "Wiki/13-DeepArchitecture.md",
+    "IPFRS_ARCHITECTURE_SONNET.md",
+    "ARCHITECTURE_GUIDE.md",
+    "Wiki/WIKI_SCHEMA.md",
+    "Vendor/ipfrs/target/debug/deps/ipfrs_interface-258a2a9778dcdc63",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/work-products.bin",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/query-cache.bin",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/f5igj1a71vd0h4nle1iox1ulh.o",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/f2cha7q5olav7j3kfxtzru4nb.o",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/f05z73om9af9szn4v0zirlom4.o",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/ewuncl7evzlon2wbxyqxb1cz5.o",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/evrghxcs4w06luwatgyq56yk9.o",
+    "Vendor/ipfrs/target/debug/incremental/ipfrs_interface-2g4eeucmx1tur/s-hjlkt5worl-0nzij3s-32ry7400uwt1hm0l5i4molgq2/ev3d4p6g26ktqlq0z6zwrkrr4.o",
+    "Wiki/INDEX.md",
+    "IPFRS_DEEP_ARCHITECTURE.md",
+    "Wiki/12-MasterArchitecture.md",
+    "IPFRS_ARCHITECTURE_MASTER.md",
+    "Wiki/07-LogicDomain.md",
+    "Wiki/03-BoundedContexts.md",
+    "Wiki/08-TransportDomain.md",
+    "Vendor/PROJECT_STATUS.md",
+    "Vendor/ipfrs/ARCHITECTURE_DDD.md",
+    "Vendor/ipfrs/ARCHITECTURE_DDD_DEEP.md",
+    "Vendor/ipfrs/ARCHITECTURE_INDEX.md",
+    "Wiki/02-ArchitectureStack.md",
+    "Wiki/README.md",
+    "Wiki/log.md",
+    "Wiki/04-StorageDomain.md",
+    "Wiki/05-NetworkDomain.md"
+  ]
+}

@@ -66,23 +66,23 @@ tags: [ipfrs, ddd, architecture, rust, distributed-systems]
                     │   Ipld, Error)  │
                     └────────┬────────┘
                              │ upstream
-          ┌──────────────────┼──────────────────────┐
+          ┌──────────────────┼───────────────────────┐
           │                  │                       │
-   ┌──────▼──────┐   ┌───────▼──────┐   ┌───────────▼──────┐
-   │ipfrs-storage│   │ipfrs-network │   │ipfrs-tensorlogic │
-   │  (BlockStore│   │(NetworkNode, │   │(KnowledgeBase,   │
-   │   WAL, GC,  │   │ Gossip, DHT, │   │ InferenceEngine, │
+   ┌──────▼──────┐   ┌───────▼──────┐   ┌────────────▼──────┐
+   │ipfrs-storage│   │ipfrs-network │   │ipfrs-tensorlogic  │
+   │  (BlockStore│   │(NetworkNode, │   │(KnowledgeBase,    │
+   │   WAL, GC,  │   │ Gossip, DHT, │   │ InferenceEngine,  │
    │   Tiering)  │   │ NAT, Relay)  │   │ Neural-Symbolic)  │
-   └──────┬──────┘   └───────┬──────┘   └───────────┬──────┘
+   └──────┬──────┘   └───────┬──────┘   └────────────┬──────┘
           │                  │                       │
-   ┌──────▼──────┐           │           ┌───────────▼──────┐
+   ┌──────▼───────┐          │           ┌───────────▼───────┐
    │ipfrs-semantic│          │           │  ipfrs-transport  │
-   │  (HNSW,     │          │           │  (Bitswap,        │
-   │  DiskANN,   │◄─────────┘           │  GraphSync, QUIC) │
-   │  LogicSolver│                      └───────────┬──────┘
-   └──────┬──────┘                                  │
-          │                                         │
-          └────────────────┬────────────────────────┘
+   │  (HNSW,      │          │           │  (Bitswap,        │
+   │  DiskANN,    │◄─────────┘           │  GraphSync, QUIC) │
+   │  LogicSolver │                      └───────────┬───────┘
+   └──────┬───────┘                                  │
+          │                                          │
+          └────────────────┬─────────────────────────┘
                            │ imports from all domains
                    ┌───────▼───────┐
                    │     ipfrs     │  ◄── Application Service Layer
@@ -90,13 +90,13 @@ tags: [ipfrs, ddd, architecture, rust, distributed-systems]
                    │   GC, Auth,   │
                    │   PinManager) │
                    └───────┬───────┘
-                    ┌──────┴──────┐
-                    │             │
-             ┌──────▼──────┐ ┌───▼────────────┐
-             │ipfrs-interface│ │   ipfrs-cli   │
-             │ (gRPC, HTTP,  │ │  (CLI cmds,   │
-             │  GraphQL,     │ │   TUI, shell) │
-             │  OAuth2, FFI) │ └───────────────┘
+                    ┌──────┴───────┐
+                    │              │
+             ┌──────▼────────┐ ┌───▼────────────┐
+             │ipfrs-interface│ │   ipfrs-cli    │
+             │ (gRPC, HTTP,  │ │  (CLI cmds,    │
+             │  GraphQL,     │ │   TUI, shell)  │
+             │  OAuth2, FFI) │ └────────────────┘
              └───────┬───────┘
               ┌──────┴──────┐
               │             │
