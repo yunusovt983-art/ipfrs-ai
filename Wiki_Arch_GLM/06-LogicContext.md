@@ -49,7 +49,7 @@ Logic Context — самый концептуально сложный bounded c
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │                    INFERENCE ENGINES (9 engines)             │   │
+│  │                    INFERENCE ENGINES (25 engines)            │   │
 │  │  ─────────────────────────────────────────────────────────── │   │
 │  │  InferenceEngine         — SLD Resolution                    │   │
 │  │  TabledInferenceEngine   — SLG Tabling (recursion-safe)      │   │
@@ -60,6 +60,10 @@ Logic Context — самый концептуально сложный bounded c
 │  │  BayesianNetworkInference — VE/BP/Gibbs sampling             │   │
 │  │  NeuralSymbolicIntegrator — Hybrid neural-symbolic           │   │
 │  │  DistributedBackwardChainer — Cross-peer reasoning           │   │
+│  │  + 16 more: Memoized SLD, Fixpoint/Datalog, full Mamdani,    │   │
+│  │    Bayesian Updater, Abductive, Causal (do-calculus), CSP,   │   │
+│  │    Constraint Propagation, Belief Revision (AGM), MDP, 2× RL,│   │
+│  │    Hypothesis Testing, Prob. Program, Decision Tree, Ensemble│   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -660,54 +664,280 @@ pub struct SecureAggregation {
 
 ## 5. Inference Engines
 
+> **Полный каталог (обновлено 2026-06-19, выверено по коду).** Контекст содержит
+> **25 движков вывода и обучения** — это крупнейшая уникальная ценность IPFRS. Ранее
+> в этой секции были описаны лишь 3 (SLD, SLG, Temporal); ниже — все 25 с реальными
+> сигнатурами и привязкой `file:line`. Имена/алиасы сверены с `lib.rs` (`pub use`,
+> строки 558–706); многие типы реэкспортируются с префиксами (`Fle`, `Csp`, `Cpe`,
+> `Mdp`, `Pln`, `Abr`, `El`, `Dtl`, `Hte`, `Ppe`, `Rla`) во избежание коллизий имён.
+
+### Сводная таблица 25 движков
+
+| # | Движок | Тип | Алгоритм | Источник |
+|---|--------|-----|----------|----------|
+| 1 | `InferenceEngine` | дедуктивный | SLD-резолюция + унификация | `reasoning.rs:221,259` |
+| 2 | `MemoizedInferenceEngine` | дедуктивный | SLD + кэш по QueryKey | `reasoning.rs:632,657` |
+| 3 | `TabledInferenceEngine` | дедуктивный | SLG-табуляция (recursion-safe) | `recursive_reasoning.rs:101,130` |
+| 4 | `FixpointEngine` / `StratificationAnalyzer` | дедуктивный | стратифицированный Datalog-fixpoint | `recursive_reasoning.rs:312,482` |
+| 5 | `DistributedBackwardChainer` | распределённый | обратный вывод + делегирование пирам по CID | `distributed_backward_chainer.rs:33,66` |
+| 6 | `TemporalReasoningEngine` | темпоральный | 13 интервальных отношений Аллена | `temporal_reasoning.rs:293,100` |
+| 7 | `FuzzyLogicEngine` | нечёткий | Mamdani/Sugeno + дефаззификация | `fuzzy_logic.rs:325,456` |
+| 8 | `FleFuzzyLogicEngine` | нечёткий | полный Mamdani, 7 MF, 5 дефаззификаций | `fuzzy_logic_engine/types.rs:380,496` |
+| 9 | `EpistemicLogicReasoner` | модальный | S5 Kripke model-checking, K/M/E/C | `epistemic_logic.rs:210,332` |
+| 10 | `ProbabilisticLogicNetwork` | вероятностный | PLN, truth values (strength, confidence) | `probabilistic_logic_network.rs:483,577` |
+| 11 | `BayesianNetworkInference` | вероятностный | VE / Belief Propagation / Sampling | `bayesian_network_inference.rs:575,665` |
+| 12 | `BayesianUpdateEngine` | вероятностный | сопряжённые приоры (Beta/Gauss/Dirichlet/Gamma) | `bayesian_updater.rs:335,357` |
+| 13 | `AbductiveReasoningEngine` | абдуктивный | branch-and-bound по гипотезам | `abductive_reasoning_engine.rs:392,476` |
+| 14 | `CausalInferenceEngine` | каузальный | do-исчисление Пёрла + контрфактика | `causal_inference.rs:244,573` |
+| 15 | `ConstraintSolver` | CSP | AC-3 + backtracking + MRV/LCV | `constraint_solver.rs:322,764` |
+| 16 | `BeliefRevisionEngine` | ревизия | AGM expansion/contraction/Levi-revision | `belief_revision_engine.rs:336,487` |
+| 17 | `ConstraintPropagationEngine` | CSP | AC3/AC4/AC6 + bounds propagation | `constraint_propagation_engine/types_3.rs:16,93` |
+| 18 | `MarkovDecisionProcess` | планирование | value/policy iteration (Беллман) | `markov_decision_process/types.rs:150,259` |
+| 19 | `ReinforcementLearningAgent` | RL | SARSA/Q/Expected-SARSA/Double-Q/N-step | `reinforcement_learning_agent.rs:53,201` |
+| 20 | `ReinforcementLearner` | RL | Q/SARSA/Double-Q (упрощённый) | `reinforcement_learner.rs:217,386` |
+| 21 | `HypothesisTestEngine` | статистика | z/t-тесты, χ², тесты долей | `hypothesis_test_engine/types.rs:73,107` |
+| 22 | `ProbabilisticProgramEngine` | вероятностный | MCMC: MH/Gibbs/Importance/Rejection | `probabilistic_program_engine/ppe_types.rs:131` |
+| 23 | `NeuralSymbolicIntegrator` | гибридный | смесь нейро + символика | `neural_symbolic.rs:227,474` |
+| 24 | `DecisionTreeLearner` | индуктивный | ID3/C4.5 (Entropy/Gini), прунинг | `decision_tree_learner.rs:334,396` |
+| 25 | `EnsembleLearner` | индуктивный | Bagging/AdaBoost/GradBoost/RF/Stacking | `ensemble_learner/types.rs:217,266` |
+
+---
+
 ### 5.1 SLD Resolution
 
-**Файл**: `reasoning.rs` (~800 LOC)
+```rust
+pub struct InferenceEngine {                 // reasoning.rs:221
+    max_depth: usize,                         // default 100
+    max_solutions: usize,                     // default 100
+    cycle_detection: bool,                    // default true
+}
+// reasoning.rs:259
+pub fn query(&self, goal: &Predicate, kb: &KnowledgeBase) -> Result<Vec<Substitution>>;
+pub fn prove(&self, goal: &Predicate, kb: &KnowledgeBase) -> Result<Option<Proof>>;
+```
+Обратный вывод (SLD): унифицирует цель с фактами и головами правил, рекурсивно решает
+конъюнкцию тела, собирает подстановки до лимитов; циклы детектируются по стеку целей.
+`unify_predicates` экспортируется отдельно.
+
+### 5.2 Memoized SLD
 
 ```rust
-pub struct InferenceEngine {
-    max_depth: usize,
-    max_solutions: usize,
-    cycle_detection: bool,
-}
-
-impl InferenceEngine {
-    pub fn query(&self, goal: &Predicate, kb: &KnowledgeBase) -> Result<Vec<Substitution>>;
-    pub fn prove(&self, goal: &Predicate, kb: &KnowledgeBase) -> Result<Option<Proof>>;
+pub struct MemoizedInferenceEngine {          // reasoning.rs:632
+    engine: InferenceEngine,
+    cache: Arc<CacheManager>,
 }
 ```
+Обёртка над `InferenceEngine` с кэшированием результатов по `QueryKey`: попадание → готовые
+подстановки, промах → запрос + запись в кэш.
 
-### 5.2 SLG Tabling
-
-**Файл**: `recursive_reasoning.rs` (~600 LOC)
+### 5.3 SLG Tabling
 
 ```rust
-pub struct TabledInferenceEngine {
-    tables: HashMap<Predicate, TableEntry>,
-    worklist: VecDeque<Goal>,
-}
-
-enum TableEntry {
-    InProgress,
-    Complete(Vec<Substitution>),
+pub struct TabledInferenceEngine {            // recursive_reasoning.rs:101
+    table: HashMap<String, TableEntry>,
+    max_depth: usize,                         // default 100
+    max_solutions: usize,                     // default 1000
 }
 ```
+SLG-резолюция: мемоизирует подцели в таблице; первая запись помечается неполной (детект
+циклов), затем полной. Обращение к ещё вычисляемой подцели возвращает пусто, разрывая цикл.
 
-### 5.3 Temporal Reasoning
+### 5.4 Stratified Fixpoint (Datalog)
 
-**Файл**: `temporal_reasoning.rs` (~500 LOC)
+```rust
+pub struct FixpointEngine { max_iterations: usize }   // recursive_reasoning.rs:312, default 100
+pub fn compute_fixpoint(&self, kb: &KnowledgeBase) -> Result<KnowledgeBase>;
+pub enum StratificationResult { Stratifiable(Vec<Vec<String>>), NonStratifiable } // :482
+```
+Итеративно применяет все правила, выводя наземные факты до неподвижной точки.
+`StratificationAnalyzer` строит граф зависимостей предикатов, ищет циклы DFS и разбивает на слои.
 
-**Allen's 13 Relations**:
+### 5.5 Distributed Backward Chaining
 
-| Relation | Inverse | Meaning |
-|----------|---------|---------|
-| Before | After | X ends before Y starts |
-| Meets | MetBy | X ends when Y starts |
-| Overlaps | OverlappedBy | X starts before Y, overlaps |
-| Starts | StartedBy | X and Y start together |
-| During | Contains | X contained in Y |
-| Finishes | FinishedBy | X and Y end together |
-| Equals | Equals | X and Y identical |
+```rust
+pub struct DistributedBackwardChainer {       // distributed_backward_chainer.rs:33
+    pub max_depth: usize,        // default 10
+    pub max_remote_peers: usize, // default 3
+    pub timeout_ms: u64,         // default 5000
+}
+// distributed_backward_chainer.rs:66
+pub async fn prove_with_tree<FP, FQ>(&self, goal: &Term, local_kb: &KnowledgeBase,
+                                     find_providers: FP, remote_query: FQ) -> Result<ProofTree>;
+```
+Асинхронный вывод: при неудаче локально вычисляет CID правил, ищет провайдеров в DHT и
+рассылает цель ≤`max_remote_peers` пирам; первый успех встраивается в дерево с аннотацией пира.
+
+### 5.6 Temporal Reasoning
+
+```rust
+pub struct TemporalReasoningEngine {          // temporal_reasoning.rs:293
+    events: HashMap<String, TemporalEvent>,
+    constraints: Vec<TemporalConstraint>,
+    max_events: usize,
+}
+pub enum AllenRelation {                       // temporal_reasoning.rs:100 — 13 отношений
+    Precedes, Meets, Overlaps, FinishedBy, Contains, Starts,
+    Equals, StartedBy, During, Finishes, OverlappedBy, MetBy, PrecededBy,
+}
+pub fn allen_relation(&self, a: &str, b: &str) -> Option<AllenRelation>;
+```
+Алгебра Аллена: классифицирует пару интервалов сравнением границ (13 отношений). Проверяет
+ограничения и находит цепи событий BFS по графу перекрытий.
+
+### 5.7 Fuzzy Logic (simple) & 5.8 Full Mamdani
+
+```rust
+pub struct FuzzyLogicEngine {                  // fuzzy_logic.rs:325
+    variables: HashMap<String, FuzzyVariable>, rules: Vec<FuzzyRule>,
+    inference: InferenceMethod, defuzz: DefuzzMethod,
+}
+pub enum InferenceMethod { Mamdani, Sugeno }
+pub enum DefuzzMethod { Centroid, MeanOfMax, LargestOfMax }
+pub fn infer(&self, inputs: &HashMap<String, f64>, output_var: &str) -> Result<f64, FuzzyError>; // :456
+```
+Mamdani активирует/агрегирует множества поточечным max + дефаззификация; Sugeno — взвешенная
+сумма центроидов. **Полный движок** `FleFuzzyLogicEngine` (`fuzzy_logic_engine/types.rs:380`)
+добавляет деревья антецедентов (And/Or/Not/Very/Somewhat), 7 MF и 5 методов дефаззификации,
+дискретизация `resolution=100`.
+
+### 5.9 Epistemic Logic (S5)
+
+```rust
+pub struct EpistemicLogicReasoner {            // epistemic_logic.rs:210
+    pub model: KripkeModel, pub agents: Vec<AgentId>, pub max_depth: usize,
+}
+pub enum EpistemicFormula {                     // Atom/Not/And/Or/Knows/Possible/EveryoneKnows/CommonKnowledge
+    Knows { agent: AgentId, phi: Box<EpistemicFormula> },
+    CommonKnowledge(Box<EpistemicFormula>), /* ... */
+}
+pub fn evaluate_actual(&self, formula: &EpistemicFormula) -> Result<bool, EpistemicError>;
+```
+Model-checking модальных формул K_i/M_i в модели Крипке S5 (проверка во всех доступных мирах).
+E(φ) — по всем агентам; C(φ) — fixpoint на объединённом отношении доступности (BFS до `max_depth`).
+
+### 5.10 PLN (Probabilistic Logic Network)
+
+```rust
+pub struct TruthValue { pub strength: f64, pub confidence: f64 }   // probabilistic_logic_network.rs
+pub enum PlnInferenceRule { Deduction, Induction, Abduction, Revision,
+                            Conjunction, Disjunction, Negation, ModusPonens }
+pub fn infer(&mut self, rule: PlnInferenceRule, premise_ids: Vec<String>)
+    -> Result<PlnInferenceResult, PlnError>;                        // :577
+```
+Неопределённый вывод над гиперграфом атомов 8 правилами: Conjunction = s₁·s₂,
+Disjunction = 1−(1−s₁)(1−s₂), Revision = взвешенное объединение. BFS ищет цепи вывода.
+Defaults: `max_atoms=100_000`, `inference_depth=6`, `min_confidence_threshold=0.01`.
+
+### 5.11–5.12 Bayesian: Network & Updater
+
+```rust
+pub enum InferenceAlgorithm { VariableElimination, BeliefPropagation, Sampling { n_samples, seed } }
+pub fn query(&mut self, q: &InferenceQuery) -> Result<Vec<QueryResult>, BniError>; // bayesian_network_inference.rs:665
+pub enum Prior { Beta{..}, Gaussian{..}, Dirichlet{..}, Gamma{..} }                // bayesian_updater.rs
+pub fn update(&mut self, prior: Prior, observation: &Observation) -> Result<Posterior, BayesError>; // :357
+```
+**Network**: точный/приближённый вывод P(query|evidence) над DAG (VE/BP/weighted sampling, xorshift64).
+**Updater**: сопряжённое обновление (Beta-Bernoulli, Gauss-Gauss, Dirichlet-Categorical, Gamma-Poisson) +
+кредальные интервалы и KL-дивергенция.
+
+### 5.13 Abductive Reasoning
+
+```rust
+pub enum AbrCostFunction { SumCost, MaxCost, CountCost, WeightedCost(HashMap<HypothesisId,f64>) }
+pub fn abduce(&mut self) -> Vec<AbrExplanation>;   // abductive_reasoning_engine.rs:476
+```
+Branch-and-bound по подмножествам гипотез, упорядоченным по стоимости; отсекает наборы, не
+покрывающие наблюдения. Defaults: `max_explanations=10`, `max_hypothesis_set_size=8`, `SumCost`.
+
+### 5.14 Causal Inference (do-calculus)
+
+```rust
+pub struct Intervention { pub node: CausalNodeId, pub value: f64 }
+pub fn do_calculus(&self, intervention: &Intervention, target: &CausalNodeId) -> InferenceResult; // causal_inference.rs:573
+pub fn counterfactual(&self, query: &CounterfactualQuery) -> InferenceResult;                     // :612
+```
+P(target | do(intervention)) аккумуляцией линейных эффектов по направленным путям (Gaussian SCM);
+`counterfactual` добавляет взвешенную коррекцию от условных переменных.
+
+### 5.15 & 5.17 Constraint: Solver (CSP) & Propagation
+
+```rust
+pub enum Constraint { AllDifferent(..), Equal(..), NotEqual(..), LessThan(..),
+                      LessEqual(..), Sum{vars, target}, InDomain{var, allowed} }
+pub fn solve(&mut self) -> SolverResult;   // constraint_solver.rs:764
+```
+**CSP-solver**: AC-3 + backtracking + MRV/LCV/forward-checking. **Constraint Propagation**
+(`constraint_propagation_engine/types_3.rs:93`) — уровни AC3/AC4/AC6 + bounds propagation + Fail-First.
+
+### 5.16 Belief Revision (AGM)
+
+```rust
+pub enum RevisionOp { Expansion(Belief), Contraction(String), Revision(Belief), Consolidation }
+pub enum RetentionFunction { EpistemicEntrenchment, RecencyBias, SourcePriority(..), MinimalChange }
+pub fn revise(&mut self, belief: Belief) -> Result<(Vec<String>, Vec<String>), RevisionError>; // :revise
+```
+AGM: expansion (+ следствия), contraction (макс. непротиворечивые подмножества),
+revision (тождество Леви: contract ¬φ → expand φ). Consolidation по `RetentionFunction`.
+
+### 5.18 Markov Decision Process
+
+```rust
+pub enum SolverType { ValueIteration, PolicyIteration, ModifiedPolicyIteration(usize), Qlearning{alpha,epsilon} }
+pub fn value_iteration(&self, config: &SolverConfig) -> (ValueFunction, SolverResult);          // markov_decision_process/types.rs:259
+pub fn policy_iteration(&self, config: &SolverConfig) -> (MdpPolicy, ValueFunction, SolverResult); // :353
+```
+Беллмановское обновление `V(s)=max_a Σ p(t)·(r+γ·V(t'))` до сходимости; policy iteration
+чередует оценку и жадное улучшение. Defaults: `gamma=0.99`, `epsilon=1e-6`, `max_iter=1000`.
+
+### 5.19–5.20 Reinforcement Learning (×2)
+
+```rust
+pub enum AlgorithmType { Sarsa, QLearning, ExpectedSarsa, DoubleQLearning, NStepTD(u8) }   // rla_types.rs:139
+pub enum AgentPolicy { EpsilonGreedy{..}, Boltzmann{temperature}, UCB{c}, Random }
+pub fn update(&mut self, transition: &Transition) -> Result<f64, RlAgentError>;            // reinforcement_learning_agent.rs:201
+```
+Табличный RL: обновление по TD-ошибке δ = r + γ·Q(s',a') − Q(s,a), с experience replay и
+eligibility traces. `ReinforcementLearner` (`reinforcement_learner.rs:217`) — упрощённый вариант
+(Q/SARSA/Double-Q).
+
+### 5.21–5.22 Hypothesis Testing & Probabilistic Program
+
+```rust
+pub enum TestType { OneSampleZTest{..}, OneSampleTTest{..}, TwoSampleTTest{..},
+                    ChiSquareGoodnessOfFit{..}, ChiSquareIndependence{..}, OneSampleProportion{..}, TwoSampleProportion }
+pub enum PpeSamplingMethod { MetropolisHastings, GibbsSampling, ImportanceSampling, RejectionSampling }
+```
+**Hypothesis Testing** (`hypothesis_test_engine/types.rs:107`): z/t/χ²/тесты долей → p-value,
+доверительные интервалы, размер эффекта (Cohen's d, Cramér's V), мощность Монте-Карло.
+**Probabilistic Program** (`probabilistic_program_engine/mod.rs:132`): апостериорный сэмплинг
+(MH/Gibbs/Importance/Rejection) с burn-in и thinning.
+
+### 5.23 Neural-Symbolic Integrator
+
+```rust
+pub enum InferenceMode { PureSymbolic, PureNeural, Hybrid { neural_weight: f64 } }  // neural_symbolic.rs:124
+pub fn infer(&mut self, query: &NsQuery) -> Result<NsResult, NsError>;              // :474
+// формула смешивания (neural_symbolic.rs:489):
+let nw = neural_weight.clamp(0.0, 1.0);
+nw * neural + (1.0 - nw) * symbolic
+```
+Гибрид: близость эмбеддингов (нейро) + forward-chaining по правилам (символика). `NsResult`
+возвращает `neural_contribution` и `symbolic_contribution` раздельно (объяснимость).
+Defaults: `embedding_dim=128`, `inference_depth=5`, `similarity_threshold=0.7`.
+
+### 5.24–5.25 Inductive Learners: Decision Tree & Ensemble
+
+```rust
+pub enum DtlCriterion { Entropy, Gini, MisclassificationRate }   // decision_tree_learner.rs
+pub enum ElMethod { Bagging, AdaBoost, GradientBoosting, RandomForest, Stacking }  // ensemble_learner/types.rs:182
+pub fn fit(&mut self, samples: &[DtlSample]) -> Result<(), DtlError>;
+```
+**Decision Tree**: ID3/C4.5, бинарные разбиения по непрерывным признакам (Entropy/Gini/MisclassRate),
+прунинг. **Ensemble**: 5 стратегий ансамблирования. Весь рандом — на `xorshift64` (без crate `rand`).
+
+> ⚠️ **Архитектурная заметка**: единого `trait InferenceEngine`, который реализуют все 25
+> движков, **нет** — `reasoning::InferenceEngine` это конкретная структура. Отсюда дублирование
+> примитивов (несколько PRNG, 2 RL, 2 fuzzy) — технический долг (см. `[[../Wiki/11-RealityCheck]]`).
 
 ---
 
@@ -764,8 +994,23 @@ pub struct ProofCache {
 | **Inference** | fuzzy_logic.rs | 400+ | Mamdani/Sugeno |
 | **Inference** | epistemic_logic.rs | 450+ | S5 Kripke |
 | **Inference** | probabilistic_logic_network.rs | 700+ | PLN |
-| **Inference** | bayesian_network_inference.rs | 500+ | BN inference |
+| **Inference** | bayesian_network_inference.rs | 500+ | BN inference (VE/BP/sampling) |
 | **Inference** | neural_symbolic.rs | 600+ | Hybrid integration |
+| **Inference** | distributed_backward_chainer.rs | 300+ | Cross-peer backward chaining |
+| **Inference** | bayesian_updater.rs | 400+ | Conjugate-prior updating |
+| **Inference** | abductive_reasoning_engine.rs | 500+ | Abduction (branch-and-bound) |
+| **Inference** | causal_inference.rs | 600+ | Do-calculus + counterfactuals |
+| **Inference** | constraint_solver.rs | 800+ | CSP (AC-3 + backtracking) |
+| **Inference** | constraint_propagation_engine/ | 400+ | AC3/AC4/AC6 propagation |
+| **Inference** | belief_revision_engine.rs | 500+ | AGM belief revision |
+| **Inference** | markov_decision_process/ | 400+ | MDP value/policy iteration |
+| **Inference** | reinforcement_learning_agent.rs | 500+ | RL (SARSA/Q/Double-Q/N-step) |
+| **Inference** | reinforcement_learner.rs | 400+ | RL (simplified tabular) |
+| **Inference** | hypothesis_test_engine/ | 300+ | z/t/χ² statistical tests |
+| **Inference** | probabilistic_program_engine/ | 400+ | MCMC posterior sampling |
+| **Inference** | fuzzy_logic_engine/ | 600+ | Full Mamdani (7 MF, 5 defuzz) |
+| **Learning** | decision_tree_learner.rs | 400+ | ID3/C4.5 with pruning |
+| **Learning** | ensemble_learner/ | 500+ | Bagging/Boosting/RF/Stacking |
 | **Gradient** | gradient/mod.rs | 500+ | Gradient types |
 | **Gradient** | backward_pass.rs | 300+ | Backward pass |
 | **Gradient** | federated.rs | 400+ | Federated aggregation |
