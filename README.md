@@ -441,7 +441,7 @@ Wiki_Arch_GLM/              — GLM-вариант DDD-анализа (13 фай
 
 | Контрибьютор | E-mail | Роль |
 |--------------|--------|------|
-| Temur | rsut.istio@gmail.com | Maintainer · архитектура · документация |
+| Temur | rust.istio@gmail.com | Maintainer · архитектура · документация |
 
 Полный список — в [CONTRIBUTORS.md](CONTRIBUTORS.md). Вклад приветствуется — открывайте
 issue или pull request.

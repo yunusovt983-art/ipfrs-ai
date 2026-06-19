@@ -4,7 +4,7 @@
 
 | Контрибьютор | E-mail | Вклад |
 |--------------|--------|-------|
-| Temur | rsut.istio@gmail.com | Maintainer · архитектура · документация (Wiki, RoadMap) |
+| Temur | rust.istio@gmail.com | Maintainer · архитектура · документация (Wiki, RoadMap) |
 
 ---
 
