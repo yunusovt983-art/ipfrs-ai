@@ -90,6 +90,147 @@ Logic Context — самый концептуально сложный bounded c
 
 ---
 
+## 1bis. IR — Symbolic Core (глубокое погружение)
+
+> **Добавлено 2026-06-19, выверено по коду.** Раньше IR был показан только в
+> ASCII-обзоре. Ниже — реальная структура символического ядра: типы IR, унификация,
+> контент-адресация правил и три индекса (`term_index`, `rule_index`, `rule_dependency`).
+> Источник: `ir.rs`, `reasoning.rs`, `ipld_codec.rs`, `term_index.rs`, `rule_index.rs`,
+> `rule_dependency.rs`.
+
+### 1bis.1 Лестница типов IR: `Term → Predicate → Rule → KnowledgeBase`
+
+```rust
+// ir.rs:13 — Term: рекурсивный алгебраический тип (Value Object)
+pub enum Term {
+    Var(String),              // ?X — переменная
+    Const(Constant),          // константа
+    Fun(String, Vec<Term>),   // f(X, Y) — применение функции
+    Ref(TermRef),             // ссылка на терм по CID — мост символика↔контент-адрес
+}
+// ir.rs:26 — Constant: Float ХРАНИТСЯ КАК String для детерминированного хеширования
+pub enum Constant { String(String), Int(i64), Bool(bool), Float(String) }
+
+// ir.rs:39 — TermRef: { cid: Cid, hint: Option<String> }, CID сериализуется строкой
+
+pub struct Predicate { pub name: String, pub args: Vec<Term> }   // ir.rs:165 (VO)
+pub struct Rule { pub head: Predicate, pub body: Vec<Predicate> } // ir.rs:218 (VO) — хорн-клауза
+pub struct KnowledgeBase { pub facts: Vec<Predicate>, pub rules: Vec<Rule> } // ir.rs:278 (Aggregate Root)
+```
+
+**Тонкости трейтов (важно для индексирования):**
+- `Term` и `Constant` выводят `PartialEq + Eq + Hash` (`ir.rs:12,25`) → могут быть ключами хеш-таблиц (hash-consing).
+- `Predicate` выводит `PartialEq + Eq`, но **НЕ `Hash`** (`ir.rs:164`).
+- `Rule` выводит только `Debug + Clone + Serialize/Deserialize` — **ни `Eq`, ни `Hash`** (`ir.rs:217`); идентичность правила выражается через его **CID** (см. §1bis.3), не через `==`.
+
+**Ключевые методы `Term`:**
+| Метод | Семантика | Источник |
+|-------|-----------|----------|
+| `is_ground()` | нет переменных; `Ref` считается ground | `ir.rs:80` |
+| `variables()` | отсортированный dedup-список переменных | `ir.rs:90` |
+| `complexity()` | число узлов в дереве терма | `ir.rs:124` |
+
+> `is_ground()` для `Term::Ref(_)` возвращает `true` (`ir.rs:85`) — ссылка по CID
+> трактуется как замкнутое значение. Это позволяет хранить под-термы вне основного
+> терма (контент-адресуемая декомпозиция) без потери «заземлённости».
+
+`KnowledgeBase` — **открытый мир**: `add_fact`/`add_rule` просто делают `push` без
+проверки противоречий (`ir.rs:292,297`). KB может одновременно содержать `p` и `¬p`;
+согласованность — забота сервисов (`BeliefRevisionEngine`, `rule_conflict_resolver`).
+
+### 1bis.2 Унификация (сердце вывода) — `reasoning.rs:511`
+
+```rust
+pub type Substitution = HashMap<String, Term>;          // reasoning.rs:19 — Value Object
+pub fn unify(t1: &Term, t2: &Term, subst: &Substitution) -> Option<Substitution>;  // :511
+pub fn unify_predicates(p1, p2, subst) -> Option<Substitution>;                     // :555
+```
+
+Алгоритм (Робинсон, с occurs-check):
+1. Применить текущую подстановку к обоим термам (`apply_subst_term`, `:512`).
+2. Две равные константы → успех без изменений (`:517`).
+3. Переменная vs терм → **occurs-check** (`occurs_in`, `:576`); если переменная
+   входит в терм — провал (защита от бесконечных термов), иначе связать `v ↦ t` (`:527-531`).
+4. `Fun(f,args1)` vs `Fun(f,args2)` при равном функторе и арности → рекурсивно
+   унифицировать аргументы (`:536`).
+5. `Ref(r1)` vs `Ref(r2)` → равны, если **совпадают CID** (`:548`).
+
+> Инвариант: `unify_predicates` сначала проверяет имя и арность (`:560`) — отсюда
+> быстрый отказ для несовпадающих предикатов до любой работы с аргументами.
+
+### 1bis.3 Контент-адресация IR — `ipld_codec.rs`
+
+Символические структуры кодируются в DAG-CBOR `Block` и адресуются по CID:
+
+```rust
+// ipld_codec.rs:26 — плоское self-describing IPLD-представление терма
+pub enum TermIpld {
+    Atom { value }, Variable { name }, Number { value: f64 },
+    Compound { functor, args: Vec<TermIpld> }, List { items },
+    Tensor { dtype, shape: Vec<u64>, cid: Option<String> },  // ← терм-ТЕНЗОР: мост к численному IR
+    Ref { cid, hint },
+}
+pub fn rule_cid(rule: &RuleIpld) -> Result<Cid, Error>;   // ipld_codec.rs:171
+pub fn kb_to_block(kb: &KnowledgeBaseIpld) -> Result<Block, Error>; // :157
+```
+
+| Тип IPLD | Назначение | Источник |
+|----------|------------|----------|
+| `RuleIpld { head, body, metadata }` | правило как блок; **metadata входит в хеш** → равные правила с разной метаданой дают разные CID | `ipld_codec.rs:59` |
+| `FactIpld { predicate, args }` | факт хранится отдельно от правил → перечисление ground-KB без декодирования тел | `ipld_codec.rs:74` |
+| `KnowledgeBaseIpld { rules: Vec<cid>, facts, version }` | KB как DAG, ссылающийся на блоки-правила по CID → инкрементальная синхронизация + дедуп | `ipld_codec.rs:88` |
+
+**Инвариант детерминизма (I7):** равные правила → равный CID (`build_dag_cbor_cid`,
+`ipld_codec.rs:123`). Обеспечивается тем, что `Constant::Float` хранится строкой
+(`ir.rs:34`) — float-биты не расходятся между машинами. Тест
+`test_identical_rules_same_cid` это проверяет.
+
+> `TermIpld::Tensor { dtype, shape, cid }` (`ipld_codec.rs:42`) — **буквальное место,
+> где символический IR встраивает численный**: логический терм является дескриптором
+> тензора, чьи байты лежат по отдельному CID. Это глубинный слой нейро-символической
+> фузии (помимо `NeuralSymbolicIntegrator`, см. §5.23).
+
+### 1bis.4 Три индекса IR (ускорение вывода)
+
+| Индекс | Структура | Назначение | Источник |
+|--------|-----------|------------|----------|
+| `TermIndexBuilder` | posting lists `term → [(rule_id, position)]` | hash-cons термов; `rules_for_predicate`, `lookup_constant` | `term_index.rs:127` |
+| `TensorRuleIndex` | `rule_id → IndexedRule` + `predicate → [rule_id]` | O(1) поиск + фильтрация по предикату/арности/confidence/телу/active | `rule_index.rs:119,208` |
+| `RuleDependencyGraph` | ориентированный граф зависимостей правил | топосорт + расписание стратифицированной оценки | `rule_dependency.rs:148` |
+
+**`RuleArity`** (`rule_index.rs:13`): `Nullary/Unary/Binary/Ternary/NAry(n)` — категория
+арности с порядком по rank; `RuleQuery` (`rule_index.rs:80`) фильтрует по
+`head_predicate / arity / min_confidence / body_contains / active_only`.
+
+**`DependencyType`** (`rule_dependency.rs:71`) — 4 вида зависимостей:
+- `UsesConclusion` — голова правила `to` используется в теле `from`;
+- `SharesBody` — общий предикат в телах (важен порядок);
+- `Negation` — `from` использует отрицание предиката из `to` (стратификация!);
+- `Subsumption` — заключение `from` — частный случай заключения `to`.
+
+`EvaluationSchedule::build` (`rule_dependency.rs:350`) делает топологическую сортировку
+(`topological_sort`, `:215`) и разбивает правила на слои для корректной оценки;
+`has_cycle()` (`:308`) детектирует циклы (нестратифицируемость).
+
+### 1bis.5 DDD-роли символического ядра
+
+```
+Value Objects:   Term, Constant, TermRef, Predicate, Substitution
+                 (неизменяемы, идентичность по значению; Term/Const хешируемы)
+Value Object:    Rule (горн-клауза; идентичность — через CID, не через ==)
+Aggregate Root:  KnowledgeBase (владеет facts+rules; открытый мир)
+Domain Services: unify / unify_predicates / apply_subst_* (reasoning.rs)
+Factories:       rule_to_block / fact_to_block / kb_to_block (ipld_codec.rs)
+Indexes (read):  TermIndexBuilder, TensorRuleIndex, RuleDependencyGraph
+```
+
+> ⚠️ Старый черновик показывал `Fact` как отдельный тип IR. В `ir.rs` отдельного
+> `Fact` нет: факт — это `Predicate` в `KnowledgeBase.facts`, либо `Rule::fact(head)`
+> (правило с пустым телом, `ir.rs:232`). Отдельный `FactIpld` существует только на
+> уровне контент-адресации (`ipld_codec.rs:74`).
+
+---
+
 ## 2. Tensor Memory Management
 
 ### 2.1 TensorArena — Bump Allocator
