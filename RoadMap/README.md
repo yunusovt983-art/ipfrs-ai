@@ -25,7 +25,8 @@ updated: 2026-06-19
 3. **[03-Community-Docs.md](03-Community-Docs.md)** — Завершить книгу, туториалы, политики (Неделя 3-4)
 4. **[04-Features.md](04-Features.md)** — Выбрать 1-2 фичи для v0.3.0 (Неделя 5+)
 5. **[05-Upstream-Contribution.md](05-Upstream-Contribution.md)** — Как контрибьютить upstream (ongoing)
-6. **[TIMELINE.md](TIMELINE.md)** — Неделя-за-неделей план
+6. **[06-GeoInference.md](06-GeoInference.md)** — 🌍 Геораспределённый инференс: 6 фаз, привязка к коду
+7. **[TIMELINE.md](TIMELINE.md)** — Неделя-за-неделей план
 
 ---
 
