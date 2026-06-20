@@ -309,6 +309,7 @@ pub mod inference_cache;
 pub mod inference_trace;
 pub mod ipld_codec;
 pub mod ipld_path;
+pub mod model_manifest;
 pub mod ir;
 pub mod kb_federation;
 pub mod kg_traversal;
