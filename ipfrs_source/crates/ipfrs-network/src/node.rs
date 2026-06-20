@@ -1,6 +1,6 @@
 //! Network node implementation with full libp2p integration
 
-use dashmap::DashSet;
+use dashmap::{DashMap, DashSet};
 use futures::StreamExt;
 use libp2p::{
     autonat,
@@ -467,6 +467,9 @@ pub struct NetworkNode {
     /// Application-supplied callback to serve blocks by CID (RoadMap Phase 1.1).
     /// `None` until `set_block_provider` is called; inbound fetches then 404.
     block_provider: Arc<parking_lot::RwLock<Option<BlockProvider>>>,
+    /// Measured per-peer round-trip latency in ms, updated from ping events
+    /// (RoadMap Phase 3). Feeds geo routing candidate ranking.
+    peer_rtt: Arc<DashMap<PeerId, f64>>,
     /// NAT traversal (DCUtR hole-punch) metrics
     nat_metrics: Arc<parking_lot::RwLock<NatTraversalMetrics>>,
     /// In-process GossipSub manager for topic-based pub/sub messaging.
@@ -584,6 +587,7 @@ impl NetworkNode {
             bandwidth_stats: Arc::new(RwLock::new(BandwidthStats::default())),
             provider_waiters: Arc::new(Mutex::new(HashMap::new())),
             block_provider: Arc::new(RwLock::new(None)),
+            peer_rtt: Arc::new(DashMap::new()),
             nat_metrics: Arc::new(RwLock::new(NatTraversalMetrics::default())),
             gossipsub,
             inference_waiters: Arc::new(Mutex::new(HashMap::new())),
@@ -853,6 +857,7 @@ impl NetworkNode {
         let provider_waiters = Arc::clone(&self.provider_waiters);
         let nat_metrics = Arc::clone(&self.nat_metrics);
         let block_provider = Arc::clone(&self.block_provider);
+        let peer_rtt = Arc::clone(&self.peer_rtt);
         // In-flight outbound block fetches (RoadMap Phase 1.1), owned by the loop.
         let pending_fetch: PendingFetch = Arc::new(Mutex::new(HashMap::new()));
 
@@ -872,7 +877,7 @@ impl NetworkNode {
             loop {
                 tokio::select! {
                     event = swarm.select_next_some() => {
-                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch).await;
+                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch, &peer_rtt).await;
                     }
                     Some(cmd) = swarm_cmd_rx.recv() => {
                         Self::handle_swarm_command(cmd, &mut swarm, &provider_waiters, &pending_fetch).await;
@@ -900,6 +905,7 @@ impl NetworkNode {
         nat_metrics: &Arc<RwLock<NatTraversalMetrics>>,
         block_provider: &Arc<RwLock<Option<BlockProvider>>>,
         pending_fetch: &PendingFetch,
+        peer_rtt: &Arc<DashMap<PeerId, f64>>,
     ) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -1131,6 +1137,8 @@ impl NetworkNode {
             SwarmEvent::Behaviour(IpfrsBehaviourEvent::Ping(ping_event)) => {
                 if let Ok(rtt) = ping_event.result {
                     debug!("Ping to {:?}: RTT = {:?}", ping_event.peer, rtt);
+                    // Record latency for geo routing (RoadMap Phase 3).
+                    peer_rtt.insert(ping_event.peer, rtt.as_secs_f64() * 1000.0);
                 }
             }
             // Block-fetch request-response (RoadMap Phase 1.1)
@@ -1447,6 +1455,12 @@ impl NetworkNode {
         *self.block_provider.write() = Some(provider);
     }
 
+    /// Last measured round-trip latency to `peer` in milliseconds, if pinged
+    /// at least once (RoadMap Phase 3).
+    pub fn peer_rtt_ms(&self, peer: &PeerId) -> Option<f64> {
+        self.peer_rtt.get(peer).map(|v| *v)
+    }
+
     /// Fetch a block by CID from a connected peer over `/ipfrs/blockfetch/1.0.0`.
     ///
     /// Sends a request to the background swarm loop and awaits the verified block
@@ -1512,10 +1526,14 @@ impl NetworkNode {
             .map(|p| {
                 let id = p.to_string();
                 by_id.insert(id.clone(), *p);
+                // Real measured RTT from ping events (RoadMap Phase 3); peers we
+                // have not yet pinged get a neutral-high default so measured-low
+                // peers rank first.
+                let rtt_ms = self.peer_rtt.get(p).map(|v| *v).unwrap_or(1000.0);
                 crate::geo::PeerCandidate {
                     peer_id: id,
                     region: String::new(),
-                    rtt_ms: 0.0,
+                    rtt_ms,
                     load: 0.0,
                     has_model: true,
                 }
