@@ -26,12 +26,13 @@ updated: 2026-06-19
 |-----|-----|--------|
 | **Фаза 1.1** — block-fetch по swarm (`/ipfrs/blockfetch/1.0.0`) + inbound-обслуживание из стора | `ipfrs-network/src/blockfetch.rs`, `node.rs`, `ipfrs/src/node/core.rs` | `da50774`, `26ffbe5` |
 | **Фаза 2** — `ModelManifest` (DAG-CBOR, CID слоёв) | `ipfrs-tensorlogic/src/model_manifest.rs` | `1d158ca` |
-| **Фаза 4.2** — планировщик маршрутизации/хеджирования + `Node::geo_fetch_block` | `ipfrs/src/geo.rs`, `ipfrs/src/node/geo_ops.rs` | `51471a1`, `26ffbe5` |
+| **Фаза 4.2** — планировщик маршрутизации/хеджирования + `Node::geo_fetch_block` | `ipfrs-network/src/geo.rs`, `ipfrs/src/node/geo_ops.rs` | `51471a1`, `26ffbe5` |
+| **Проброс в GraphQL** — `geo_fetch(cid, hedge_k)` + `NetworkNode::geo_fetch_block` | `ipfrs-interface/src/graphql.rs`, `ipfrs-network/src/node.rs` | `7bbcae8` |
 
 Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4; `cargo check --workspace` зелёный.
 Осталось по фазам: 1.2 gossipsub-wire, 1.3 semantic-DHT transport, 3 (оживить
 GeoRouter/QualityPredictor → реальные RTT/регион в кандидатах), 5 (исполнение),
-6 (proof/FedAvg/residency), плюс проброс `geo_*` в gRPC/GraphQL.
+6 (proof/FedAvg/residency); проброс в **gRPC** (GraphQL — готово).
 
 ---
 
