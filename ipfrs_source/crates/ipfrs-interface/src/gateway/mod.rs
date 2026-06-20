@@ -93,6 +93,7 @@ impl GatewayState {
             Arc::clone(&self.store),
             self.semantic.clone(),
             self.tensorlogic.clone(),
+            self.network.clone(),
         );
         self.graphql_schema = Some(schema);
         self

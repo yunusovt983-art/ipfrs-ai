@@ -233,7 +233,8 @@ pub mod auth;
 pub mod diagnostics;
 pub mod fsck;
 pub mod gc;
-pub mod geo;
+/// Geo-distributed inference routing/hedging planner (re-exported from `ipfrs-network`).
+pub use ipfrs_network::geo;
 pub mod health;
 pub mod metrics;
 pub mod node;

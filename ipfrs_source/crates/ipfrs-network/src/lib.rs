@@ -184,6 +184,8 @@ pub use anti_entropy::{
 pub mod blockfetch;
 pub use blockfetch::{BlockRequest, BlockResponse};
 
+pub mod geo;
+
 pub mod block_transfer;
 pub use block_transfer::{
     BlockTransfer, StreamingBlockTransfer, TransferChunk, TransferDirection, TransferManagerStats,

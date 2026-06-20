@@ -4,6 +4,8 @@
 
 use async_graphql::{Context, EmptySubscription, Object, Result, Schema, SimpleObject};
 use ipfrs_core::Cid;
+use ipfrs_network::geo::RoutingPolicy;
+use ipfrs_network::NetworkNode;
 use ipfrs_semantic::{QueryFilter, SemanticRouter};
 use ipfrs_storage::{BlockStoreTrait, SledBlockStore};
 use ipfrs_tensorlogic::{Predicate, TensorLogicStore, Term};
@@ -102,6 +104,44 @@ impl QueryRoot {
                 }))
             }
             None => Ok(None),
+        }
+    }
+
+    /// Geo-aware fetch of a block from the best available provider over the swarm
+    /// (RoadMap Phase 4 MVP). Resolves DHT providers, ranks them with the geo
+    /// routing planner, and fetches from the chosen peer(s). Requires the gateway
+    /// to have been built `with_network`.
+    async fn geo_fetch(
+        &self,
+        ctx: &Context<'_>,
+        cid: String,
+        hedge_k: Option<usize>,
+    ) -> Result<Option<BlockInfo>> {
+        let network = ctx.data::<Arc<tokio::sync::Mutex<NetworkNode>>>()?;
+        let cid_parsed = cid
+            .parse::<Cid>()
+            .map_err(|e| format!("Invalid CID: {}", e))?;
+
+        let mut policy = RoutingPolicy::default();
+        if let Some(k) = hedge_k {
+            policy.hedge_k = k.max(1);
+        }
+
+        let mut guard = network.lock().await;
+        match guard.geo_fetch_block(&cid_parsed, &policy).await {
+            Ok(block) => {
+                let data_base64 = base64::Engine::encode(
+                    &base64::engine::general_purpose::STANDARD,
+                    block.data(),
+                );
+                Ok(Some(BlockInfo {
+                    cid,
+                    size: block.size(),
+                    data: Some(data_base64),
+                }))
+            }
+            // No provider / not retrievable → null rather than a hard error.
+            Err(_) => Ok(None),
         }
     }
 
@@ -373,6 +413,7 @@ pub fn create_schema(
     store: Arc<SledBlockStore>,
     semantic: Option<Arc<SemanticRouter>>,
     tensorlogic: Option<Arc<TensorLogicStore<SledBlockStore>>>,
+    network: Option<Arc<tokio::sync::Mutex<NetworkNode>>>,
 ) -> IpfrsSchema {
     let mut schema = Schema::build(QueryRoot, MutationRoot, EmptySubscription).data(store);
 
@@ -382,6 +423,10 @@ pub fn create_schema(
 
     if let Some(tl) = tensorlogic {
         schema = schema.data(tl);
+    }
+
+    if let Some(net) = network {
+        schema = schema.data(net);
     }
 
     schema.finish()

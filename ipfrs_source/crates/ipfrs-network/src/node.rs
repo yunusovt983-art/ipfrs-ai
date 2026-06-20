@@ -1481,6 +1481,66 @@ impl NetworkNode {
         }
     }
 
+    /// Geo-aware fetch of a content-addressed block (RoadMap Phase 4 MVP).
+    ///
+    /// Resolves providers of `cid` via the DHT, ranks them with the geo routing
+    /// planner ([`crate::geo::plan_routing`]), then fetches from the chosen
+    /// peer(s) in ranked order (sequential hedging). Returned blocks are
+    /// integrity-verified by [`Self::fetch_block_from_peer`].
+    ///
+    /// NOTE: candidate RTT/region/load are neutral until Phase 3 wires
+    /// `QualityPredictor`/`GeoRouter`; routing currently degenerates to
+    /// deterministic ordering among providers.
+    pub async fn geo_fetch_block(
+        &mut self,
+        cid: &cid::Cid,
+        policy: &crate::geo::RoutingPolicy,
+    ) -> IpfrsResult<ipfrs_core::Block> {
+        let providers = self
+            .find_providers_await(cid, Duration::from_secs(30))
+            .await?;
+        if providers.is_empty() {
+            return Err(ipfrs_core::error::Error::NotFound(format!(
+                "no providers found for {}",
+                cid
+            )));
+        }
+
+        let mut by_id: HashMap<String, PeerId> = HashMap::new();
+        let candidates: Vec<crate::geo::PeerCandidate> = providers
+            .iter()
+            .map(|p| {
+                let id = p.to_string();
+                by_id.insert(id.clone(), *p);
+                crate::geo::PeerCandidate {
+                    peer_id: id,
+                    region: String::new(),
+                    rtt_ms: 0.0,
+                    load: 0.0,
+                    has_model: true,
+                }
+            })
+            .collect();
+
+        let decision = crate::geo::plan_routing(&candidates, policy).map_err(|e| {
+            ipfrs_core::error::Error::NotFound(format!("geo routing failed for {}: {:?}", cid, e))
+        })?;
+
+        let mut last_err = ipfrs_core::error::Error::NotFound(format!(
+            "no peer served {} within policy",
+            cid
+        ));
+        for peer_str in decision.all() {
+            if let Some(peer) = by_id.get(&peer_str).copied() {
+                match self.fetch_block_from_peer(&peer, cid).await {
+                    Ok(block) => return Ok(block),
+                    Err(e) => last_err = e,
+                }
+            }
+        }
+        Err(last_err)
+    }
+
     /// Find node (closest peers to a given peer ID) using Kademlia
     pub async fn find_node(&mut self, peer_id: PeerId) -> IpfrsResult<()> {
         if let Some(swarm) = &mut self.swarm {
