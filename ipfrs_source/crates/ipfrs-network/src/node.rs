@@ -33,12 +33,17 @@ type ProviderWaiters = Arc<Mutex<HashMap<String, Vec<oneshot::Sender<Vec<PeerId>
 pub type InferenceWaiters =
     Arc<Mutex<HashMap<String, Vec<oneshot::Sender<ipfrs_tensorlogic::InferenceResponse>>>>>;
 
-/// Callback that serves a block by CID from the application's local store.
+/// Async callback that serves a block by CID from the application's local store.
 ///
 /// The network layer has no store of its own; the application (`ipfrs::Node`)
 /// installs this via [`NetworkNode::set_block_provider`] so inbound block-fetch
 /// requests can be answered. Returns the raw block bytes, or `None` if absent.
-pub type BlockProvider = Arc<dyn Fn(&cid::Cid) -> Option<Vec<u8>> + Send + Sync>;
+/// Async because the underlying `BlockStore::get` is async.
+pub type BlockProvider = Arc<
+    dyn Fn(cid::Cid) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<u8>>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// In-flight outbound block fetches: request id → (wanted CID, reply channel).
 type PendingFetch =
@@ -1136,9 +1141,15 @@ impl NetworkNode {
                 request_response::Message::Request {
                     request, channel, ..
                 } => {
+                    // Clone the callback out of the lock so we don't hold the
+                    // guard across the await point.
+                    let provider = block_provider.read().clone();
                     let resp = match cid::Cid::try_from(request.cid.as_slice()) {
                         Ok(c) => {
-                            let bytes = block_provider.read().as_ref().and_then(|f| f(&c));
+                            let bytes = match provider {
+                                Some(f) => f(c).await,
+                                None => None,
+                            };
                             match bytes {
                                 Some(b) if b.len() as u32 <= request.max_size => {
                                     crate::blockfetch::BlockResponse::Block(b)

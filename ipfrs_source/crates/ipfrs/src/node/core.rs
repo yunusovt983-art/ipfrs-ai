@@ -152,6 +152,24 @@ impl Node {
 
         // Initialize network
         let mut network = NetworkNode::new(self.config.network.clone())?;
+        // Serve inbound block-fetch requests from our local store (RoadMap Phase 1.1).
+        {
+            let store_for_fetch = storage_arc.clone();
+            network.set_block_provider(Arc::new(move |cid: ipfrs_core::Cid| {
+                let store = store_for_fetch.clone();
+                Box::pin(async move {
+                    store
+                        .get(&cid)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|b| b.data().to_vec())
+                })
+                    as std::pin::Pin<
+                        Box<dyn std::future::Future<Output = Option<Vec<u8>>> + Send>,
+                    >
+            }));
+        }
         network.start().await?;
         self.network = Some(network);
 
