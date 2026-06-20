@@ -181,6 +181,9 @@ pub use anti_entropy::{
     AntiEntropyConfig, DigestEntry, GossipAntiEntropy, MerkleDigest, ReconcileResult,
 };
 
+pub mod blockfetch;
+pub use blockfetch::{BlockRequest, BlockResponse};
+
 pub mod block_transfer;
 pub use block_transfer::{
     BlockTransfer, StreamingBlockTransfer, TransferChunk, TransferDirection, TransferManagerStats,

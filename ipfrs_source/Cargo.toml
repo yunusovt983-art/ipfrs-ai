@@ -31,7 +31,7 @@ futures = "0.3"
 async-trait = "0.1"
 
 # Networking (libp2p stack)
-libp2p = { version = "0.56", features = ["tcp", "tokio", "quic", "noise", "yamux", "gossipsub", "kad", "identify", "ping", "macros", "autonat", "dcutr", "relay", "mdns", "rsa"] }
+libp2p = { version = "0.56", features = ["tcp", "tokio", "quic", "noise", "yamux", "gossipsub", "kad", "identify", "ping", "macros", "autonat", "dcutr", "relay", "mdns", "rsa", "request-response", "cbor"] }
 libp2p-quic = "0.13"
 quinn = "0.11"
 
