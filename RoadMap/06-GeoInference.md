@@ -18,6 +18,23 @@ updated: 2026-06-19
 
 ---
 
+## ✅ Статус реализации (2026-06-19)
+
+Первые срезы уже в коде, компилируются и покрыты тестами:
+
+| Что | Где | Коммит |
+|-----|-----|--------|
+| **Фаза 1.1** — block-fetch по swarm (`/ipfrs/blockfetch/1.0.0`) + inbound-обслуживание из стора | `ipfrs-network/src/blockfetch.rs`, `node.rs`, `ipfrs/src/node/core.rs` | `da50774`, `26ffbe5` |
+| **Фаза 2** — `ModelManifest` (DAG-CBOR, CID слоёв) | `ipfrs-tensorlogic/src/model_manifest.rs` | `1d158ca` |
+| **Фаза 4.2** — планировщик маршрутизации/хеджирования + `Node::geo_fetch_block` | `ipfrs/src/geo.rs`, `ipfrs/src/node/geo_ops.rs` | `51471a1`, `26ffbe5` |
+
+Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4; `cargo check --workspace` зелёный.
+Осталось по фазам: 1.2 gossipsub-wire, 1.3 semantic-DHT transport, 3 (оживить
+GeoRouter/QualityPredictor → реальные RTT/регион в кандидатах), 5 (исполнение),
+6 (proof/FedAvg/residency), плюс проброс `geo_*` в gRPC/GraphQL.
+
+---
+
 ## 0. Почему IPFRS уже почти готов к этому
 
 | Готовый кирпич | Где | Зачем для гео-инференса |
