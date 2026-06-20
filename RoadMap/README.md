@@ -26,6 +26,8 @@ updated: 2026-06-19
 4. **[04-Features.md](04-Features.md)** — Выбрать 1-2 фичи для v0.3.0 (Неделя 5+)
 5. **[05-Upstream-Contribution.md](05-Upstream-Contribution.md)** — Как контрибьютить upstream (ongoing)
 6. **[06-GeoInference.md](06-GeoInference.md)** — 🌍 Геораспределённый инференс: 6 фаз, привязка к коду
+   - **[ADR-GeoInference.md](ADR-GeoInference.md)** — решения по развилкам (транспорт, манифест, маршрутизация)
+   - **[06a-BlockFetch-Design.md](06a-BlockFetch-Design.md)** — детальный дизайн Фазы 1.1 (block-fetch по swarm)
 7. **[TIMELINE.md](TIMELINE.md)** — Неделя-за-неделей план
 
 ---
