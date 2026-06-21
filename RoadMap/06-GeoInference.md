@@ -36,14 +36,15 @@ updated: 2026-06-19
 | **gRPC-проброс** — `GeoService.GeoFetch` (proto + tonic) | `ipfrs-interface/proto/geo.proto`, `src/grpc.rs` (`--features grpc`) | `6a7b52e` |
 | **Фаза 1.3** — semantic-DHT transport (`/ipfrs/semsearch/1.0.0`) + распределённый поиск | `ipfrs-network/src/semsearch.rs`, `node.rs`; `ipfrs/src/node/semantic_ops.rs` | `c6f729a` |
 | **distributed_infer → wire** — публикация запросов/ответов по реальному gossipsub + серв/доставка в consumer | `ipfrs-network/src/node.rs`, `ipfrs/src/node/models_ops.rs` | `fcbd2c8` |
-| **Фаза 6 (proof-carrying)** — `InferenceResponse` несёт `responder_peer_id` (provenance) + `proof_json` (сериализованный ProofTree) | `ipfrs-tensorlogic/.../session.rs`, `ipfrs/src/node/models_ops.rs` | _текущий_ |
+| **Фаза 6 (proof-carrying)** — `InferenceResponse` несёт `responder_peer_id` (provenance) + `proof_json` (сериализованный ProofTree) | `ipfrs-tensorlogic/.../session.rs`, `ipfrs/src/node/models_ops.rs` | `247ac77` |
+| **Data-residency** — `RoutingPolicy.allowed_regions` фильтр; проброс в GraphQL/gRPC `geo_fetch` | `ipfrs-network/src/geo.rs`, `graphql.rs`, `geo.proto`/`grpc.rs` | _текущий_ |
 
 Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4, region 4/4, models 3/3; `cargo check --workspace` зелёный.
 Полный цикл замкнут: `announce_model` → gossip `/ipfrs/models` → `start_model_consumer` →
 `known_models` → `geo_fetch_block(cid)`.
-Осталось по фазам: 3 (нагрузка/load), 5 (распределённое исполнение графа — заблокировано
-отсутствием численного tensor-executor'а + циклом network↔tensorlogic), 6 (FedAvg по регионам,
-data-residency — **proof-carrying готов**). (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.
+Осталось по фазам: 3 (нагрузка/load — RTT+регион+residency готовы), 5 (распределённое
+исполнение графа — заблокировано отсутствием численного tensor-executor'а + циклом
+network↔tensorlogic), 6 (FedAvg по регионам — proof-carrying ✅, data-residency ✅). (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.
 Транспорты closed: block-fetch, gossipsub-wire, semantic-search, distributed_infer-over-wire.)
 
 ---

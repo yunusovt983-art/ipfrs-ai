@@ -116,6 +116,7 @@ impl QueryRoot {
         ctx: &Context<'_>,
         cid: String,
         hedge_k: Option<usize>,
+        regions: Option<Vec<String>>,
     ) -> Result<Option<BlockInfo>> {
         let network = ctx.data::<Arc<tokio::sync::Mutex<NetworkNode>>>()?;
         let cid_parsed = cid
@@ -126,6 +127,8 @@ impl QueryRoot {
         if let Some(k) = hedge_k {
             policy.hedge_k = k.max(1);
         }
+        // Data-residency: restrict to the given regions (RoadMap Phase 6).
+        policy.allowed_regions = regions.filter(|v| !v.is_empty());
 
         let mut guard = network.lock().await;
         match guard.geo_fetch_block(&cid_parsed, &policy).await {

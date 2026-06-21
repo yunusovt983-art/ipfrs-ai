@@ -15,6 +15,8 @@ message GeoFetchRequest {
   string cid = 1;
   // Number of peers to hedge across (0 = use policy default).
   uint32 hedge_k = 2;
+  // Data-residency: restrict to peers in these regions (empty = no restriction).
+  repeated string allowed_regions = 3;
 }
 
 // GeoFetchResponse returns the fetched block, or found=false if unavailable.

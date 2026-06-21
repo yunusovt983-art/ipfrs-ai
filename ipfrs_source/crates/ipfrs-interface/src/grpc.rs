@@ -1012,6 +1012,10 @@ impl geo_service_server::GeoService for GeoServiceImpl {
         if req.hedge_k > 0 {
             policy.hedge_k = req.hedge_k as usize;
         }
+        // Data-residency: restrict to requested regions (RoadMap Phase 6).
+        if !req.allowed_regions.is_empty() {
+            policy.allowed_regions = Some(req.allowed_regions);
+        }
 
         let mut guard = self.network.lock().await;
         match guard.geo_fetch_block(&cid, &policy).await {

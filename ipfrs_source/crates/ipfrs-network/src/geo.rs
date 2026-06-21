@@ -40,6 +40,9 @@ pub struct RoutingPolicy {
     pub deadline_ms: u64,
     /// Preferred region; candidates in this region get an affinity bonus.
     pub prefer_region: Option<String>,
+    /// Data-residency constraint (RoadMap Phase 6): when set, only peers whose
+    /// region is in this list are eligible. `None` = no restriction.
+    pub allowed_regions: Option<Vec<String>>,
     /// Whether the caller will verify `result_cid` / block integrity (ADR-005).
     pub verify: bool,
 }
@@ -50,6 +53,7 @@ impl Default for RoutingPolicy {
             hedge_k: 2,
             deadline_ms: 5_000,
             prefer_region: None,
+            allowed_regions: None,
             verify: true,
         }
     }
@@ -81,6 +85,8 @@ pub enum RoutingError {
     NoModelHolder,
     /// Candidate list was empty.
     NoCandidates,
+    /// No model-holding peer is within the policy's `allowed_regions`.
+    NoRegionMatch,
 }
 
 /// Lower score = better. Combines region affinity, RTT and load.
@@ -112,6 +118,13 @@ pub fn plan_routing(
     let mut holders: Vec<&PeerCandidate> = candidates.iter().filter(|c| c.has_model).collect();
     if holders.is_empty() {
         return Err(RoutingError::NoModelHolder);
+    }
+    // Data-residency: drop peers outside the allowed regions (RoadMap Phase 6).
+    if let Some(allowed) = &policy.allowed_regions {
+        holders.retain(|c| allowed.iter().any(|r| r == &c.region));
+        if holders.is_empty() {
+            return Err(RoutingError::NoRegionMatch);
+        }
     }
     let prefer = policy.prefer_region.as_deref();
     // Sort ascending by score; tie-break by peer_id for determinism.
@@ -202,5 +215,30 @@ mod tests {
         let cs = vec![cand("a", "eu", 10.0, 0.0, true), cand("b", "eu", 20.0, 0.0, true)];
         let d = plan_routing(&cs, &p).unwrap();
         assert_eq!(d.all().len(), 2); // only 2 holders available
+    }
+
+    #[test]
+    fn data_residency_filters_other_regions() {
+        let p = RoutingPolicy {
+            hedge_k: 5,
+            allowed_regions: Some(vec!["eu".into()]),
+            ..Default::default()
+        };
+        let cs = vec![
+            cand("us-fast", "us", 5.0, 0.0, true), // excluded by residency
+            cand("eu-slow", "eu", 80.0, 0.0, true),
+        ];
+        let d = plan_routing(&cs, &p).unwrap();
+        assert_eq!(d.all(), vec!["eu-slow".to_string()]); // only EU peer eligible
+    }
+
+    #[test]
+    fn data_residency_no_match_errs() {
+        let p = RoutingPolicy {
+            allowed_regions: Some(vec!["ap".into()]),
+            ..Default::default()
+        };
+        let cs = vec![cand("a", "eu", 10.0, 0.0, true), cand("b", "us", 20.0, 0.0, true)];
+        assert_eq!(plan_routing(&cs, &p), Err(RoutingError::NoRegionMatch));
     }
 }
