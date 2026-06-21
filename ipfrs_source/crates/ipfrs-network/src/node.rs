@@ -66,6 +66,9 @@ pub type SemSearchProvider = Arc<
 type PendingSemSearch =
     Arc<Mutex<HashMap<OutboundRequestId, oneshot::Sender<IpfrsResult<Vec<(String, f32)>>>>>>;
 
+/// Gossipsub topic on which peers advertise their current load (RoadMap Phase 3):
+/// payload = one `f32` (little-endian) in `[0.0, 1.0]`.
+pub const LOAD_TOPIC: &str = "/ipfrs/load";
 /// Gossipsub topic carrying `InferenceRequest` (JSON) over the wire (Phase 1.2 → inference).
 pub const INFERENCE_REQUEST_TOPIC: &str = "/ipfrs/inference/req";
 /// Gossipsub topic carrying `InferenceResponse` (JSON) over the wire.
@@ -588,6 +591,9 @@ pub struct NetworkNode {
     /// Coarse per-peer region tag derived from the remote address on connect
     /// (RoadMap Phase 3): "local" / "lan" / "wan:a.b". Feeds region affinity.
     peer_region: Arc<DashMap<PeerId, String>>,
+    /// Per-peer advertised load in `[0.0, 1.0]` from the `/ipfrs/load` topic
+    /// (RoadMap Phase 3). Feeds geo routing candidate ranking.
+    peer_load: Arc<DashMap<PeerId, f32>>,
     /// Application callback to answer inbound semantic-search requests from the
     /// local index (RoadMap Phase 1.3). `None` → inbound queries return empty.
     semsearch_provider: Arc<parking_lot::RwLock<Option<SemSearchProvider>>>,
@@ -716,6 +722,7 @@ impl NetworkNode {
             block_provider: Arc::new(RwLock::new(None)),
             peer_rtt: Arc::new(DashMap::new()),
             peer_region: Arc::new(DashMap::new()),
+            peer_load: Arc::new(DashMap::new()),
             semsearch_provider: Arc::new(RwLock::new(None)),
             nat_metrics: Arc::new(RwLock::new(NatTraversalMetrics::default())),
             gossipsub,
@@ -1014,6 +1021,7 @@ impl NetworkNode {
         let block_provider = Arc::clone(&self.block_provider);
         let peer_rtt = Arc::clone(&self.peer_rtt);
         let peer_region = Arc::clone(&self.peer_region);
+        let peer_load = Arc::clone(&self.peer_load);
         let semsearch_provider = Arc::clone(&self.semsearch_provider);
         // In-flight outbound block fetches (RoadMap Phase 1.1), owned by the loop.
         let pending_fetch: PendingFetch = Arc::new(Mutex::new(HashMap::new()));
@@ -1036,7 +1044,7 @@ impl NetworkNode {
             loop {
                 tokio::select! {
                     event = swarm.select_next_some() => {
-                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch, &peer_rtt, &peer_region, &semsearch_provider, &pending_semsearch).await;
+                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch, &peer_rtt, &peer_region, &peer_load, &semsearch_provider, &pending_semsearch).await;
                     }
                     Some(cmd) = swarm_cmd_rx.recv() => {
                         Self::handle_swarm_command(cmd, &mut swarm, &provider_waiters, &pending_fetch, &pending_semsearch).await;
@@ -1066,6 +1074,7 @@ impl NetworkNode {
         pending_fetch: &PendingFetch,
         peer_rtt: &Arc<DashMap<PeerId, f64>>,
         peer_region: &Arc<DashMap<PeerId, String>>,
+        peer_load: &Arc<DashMap<PeerId, f32>>,
         semsearch_provider: &Arc<RwLock<Option<SemSearchProvider>>>,
         pending_semsearch: &PendingSemSearch,
     ) {
@@ -1416,13 +1425,25 @@ impl NetworkNode {
             // Gossipsub message received on a subscribed topic (RoadMap Phase 1.2).
             SwarmEvent::Behaviour(IpfrsBehaviourEvent::Gossipsub(ev)) => {
                 if let gossipsub::Event::Message { message, .. } = *ev {
-                    let _ = event_tx
-                        .send(NetworkEvent::GossipMessage {
-                            topic: message.topic.into_string(),
-                            source: message.source,
-                            data: message.data,
-                        })
-                        .await;
+                    let topic = message.topic.into_string();
+                    // Load advertisements are consumed here, not surfaced as events
+                    // (RoadMap Phase 3): record per-peer load for geo routing.
+                    if topic == LOAD_TOPIC {
+                        if let (Some(src), Ok(bytes)) =
+                            (message.source, <[u8; 4]>::try_from(message.data.as_slice()))
+                        {
+                            let load = f32::from_le_bytes(bytes).clamp(0.0, 1.0);
+                            peer_load.insert(src, load);
+                        }
+                    } else {
+                        let _ = event_tx
+                            .send(NetworkEvent::GossipMessage {
+                                topic,
+                                source: message.source,
+                                data: message.data,
+                            })
+                            .await;
+                    }
                 }
             }
             // Block-fetch outbound failure → fail the waiter if present.
@@ -1721,6 +1742,24 @@ impl NetworkNode {
         self.peer_region.get(peer).map(|v| v.clone())
     }
 
+    /// Last advertised load for `peer` in `[0.0, 1.0]` (RoadMap Phase 3).
+    pub fn peer_load_of(&self, peer: &PeerId) -> Option<f32> {
+        self.peer_load.get(peer).map(|v| *v)
+    }
+
+    /// Subscribe to peer load advertisements (`/ipfrs/load`) so geo routing can
+    /// weight candidates by load (RoadMap Phase 3).
+    pub fn subscribe_load(&self) -> IpfrsResult<()> {
+        self.subscribe_topic(LOAD_TOPIC)
+    }
+
+    /// Advertise this node's current load (clamped to `[0.0, 1.0]`) on the
+    /// `/ipfrs/load` topic so peers can avoid routing to us when busy.
+    pub fn publish_load(&self, load: f32) -> IpfrsResult<()> {
+        let bytes = load.clamp(0.0, 1.0).to_le_bytes().to_vec();
+        self.publish_topic(LOAD_TOPIC, bytes)
+    }
+
     /// Install the callback that answers inbound semantic-search requests from
     /// the local index (RoadMap Phase 1.3). Without it, inbound queries return
     /// an empty result set.
@@ -1863,11 +1902,12 @@ impl NetworkNode {
                 // peers rank first.
                 let rtt_ms = self.peer_rtt.get(p).map(|v| *v).unwrap_or(1000.0);
                 let region = self.peer_region.get(p).map(|v| v.clone()).unwrap_or_default();
+                let load = self.peer_load.get(p).map(|v| *v).unwrap_or(0.0);
                 crate::geo::PeerCandidate {
                     peer_id: id,
                     region,
                     rtt_ms,
-                    load: 0.0,
+                    load,
                     has_model: true,
                 }
             })

@@ -26,4 +26,16 @@ impl Node {
             .geo_fetch_block(cid, &RoutingPolicy::default())
             .await
     }
+
+    /// Subscribe to peer load advertisements so geo routing can weight peers by
+    /// load (RoadMap Phase 3). Call once after `start()`.
+    pub fn subscribe_peer_load(&self) -> Result<()> {
+        self.network()?.subscribe_load()
+    }
+
+    /// Advertise this node's current load in `[0.0, 1.0]` to peers (RoadMap
+    /// Phase 3) so they avoid routing geo-fetches to us when we are busy.
+    pub fn advertise_load(&self, load: f32) -> Result<()> {
+        self.network()?.publish_load(load)
+    }
 }
