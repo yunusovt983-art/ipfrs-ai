@@ -18,6 +18,7 @@ pub mod checkpoint;
 pub mod computation_graph;
 pub mod coordination;
 pub mod federated;
+pub mod regional;
 pub mod tensor;
 
 // ── GradientError ──────────────────────────────────────────────────────────
@@ -73,6 +74,10 @@ pub use backward_pass::{
 };
 
 pub use checkpoint::GradientCheckpoint;
+
+pub use regional::{
+    federated_average_by_region, federated_average_in_regions, hierarchical_federated_average,
+};
 
 pub use computation_graph::{ComputationGraphError, ComputationGraphStore, ComputationNode};
 

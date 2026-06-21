@@ -1153,6 +1153,65 @@ impl DistributedGradientAccumulator {
         }
     }
 
+    /// Tag the local gradient (with `local_region`) and every peer gradient
+    /// (with its region from `peer_regions`, or "unknown") for region-aware
+    /// aggregation (RoadMap Phase 6).
+    fn tagged_gradients(
+        &self,
+        peer_regions: &std::collections::HashMap<String, String>,
+        local_region: &str,
+    ) -> Vec<(String, Vec<f32>)> {
+        let mut tagged = Vec::with_capacity(1 + self.peer_gradients.len());
+        if !self.local_gradient.is_empty() {
+            tagged.push((local_region.to_string(), self.local_gradient.clone()));
+        }
+        for (peer, grad) in &self.peer_gradients {
+            let region = peer_regions
+                .get(peer)
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string());
+            tagged.push((region, grad.clone()));
+        }
+        tagged
+    }
+
+    /// Per-region FedAvg → `{ region: mean gradient }` (RoadMap Phase 6).
+    pub fn aggregate_by_region(
+        &self,
+        peer_regions: &std::collections::HashMap<String, String>,
+        local_region: &str,
+    ) -> Result<std::collections::BTreeMap<String, Vec<f32>>, GradientError> {
+        super::regional::federated_average_by_region(
+            &self.tagged_gradients(peer_regions, local_region),
+        )
+    }
+
+    /// Hierarchical FedAvg: average within each region, then across regions with
+    /// equal weight (mitigates region imbalance). RoadMap Phase 6.
+    pub fn aggregate_hierarchical(
+        &self,
+        peer_regions: &std::collections::HashMap<String, String>,
+        local_region: &str,
+    ) -> Result<Vec<f32>, GradientError> {
+        super::regional::hierarchical_federated_average(
+            &self.tagged_gradients(peer_regions, local_region),
+        )
+    }
+
+    /// Data-residency-constrained FedAvg: average only gradients whose region is
+    /// in `allowed` (RoadMap Phase 6).
+    pub fn aggregate_in_regions(
+        &self,
+        peer_regions: &std::collections::HashMap<String, String>,
+        local_region: &str,
+        allowed: &[String],
+    ) -> Result<Vec<f32>, GradientError> {
+        super::regional::federated_average_in_regions(
+            &self.tagged_gradients(peer_regions, local_region),
+            allowed,
+        )
+    }
+
     /// Returns `true` when at least `min_peers` peer gradients have been collected.
     pub fn is_ready(&self, min_peers: usize) -> bool {
         self.peer_gradients.len() >= min_peers
