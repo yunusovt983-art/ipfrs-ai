@@ -39,15 +39,17 @@ updated: 2026-06-19
 | **Фаза 6 (proof-carrying)** — `InferenceResponse` несёт `responder_peer_id` (provenance) + `proof_json` (сериализованный ProofTree) | `ipfrs-tensorlogic/.../session.rs`, `ipfrs/src/node/models_ops.rs` | `247ac77` |
 | **Data-residency** — `RoutingPolicy.allowed_regions` фильтр; проброс в GraphQL/gRPC `geo_fetch` | `ipfrs-network/src/geo.rs`, `graphql.rs`, `geo.proto`/`grpc.rs` | `3d817f5` |
 | **Фаза 3 (load-сигнал)** — `/ipfrs/load` gossip → `peer_load` → score; `advertise_load`/`subscribe_peer_load` | `ipfrs-network/src/node.rs`, `ipfrs/src/node/geo_ops.rs` | `89b5e18` |
-| **Фаза 6 (FedAvg по регионам)** — региональная/иерархическая/residency-агрегация градиентов | `ipfrs-tensorlogic/src/gradient/regional.rs`, `federated.rs` | _текущий_ |
+| **Фаза 6 (FedAvg по регионам)** — региональная/иерархическая/residency-агрегация градиентов | `ipfrs-tensorlogic/src/gradient/regional.rs`, `federated.rs` | `8aebe51` |
+| **Фаза 5 (фундамент)** — численный интерпретатор `ComputationGraph` (локально, подмножество ops) | `ipfrs-tensorlogic/src/numeric_exec.rs` | _текущий_ |
 
 Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4, region 4/4, models 3/3; `cargo check --workspace` зелёный.
 Полный цикл замкнут: `announce_model` → gossip `/ipfrs/models` → `start_model_consumer` →
 `known_models` → `geo_fetch_block(cid)`.
-Осталось по фазам: **только 5** (распределённое исполнение графа — заблокировано
-отсутствием численного tensor-executor'а + циклом network↔tensorlogic).
-**Фаза 3 полностью** (RTT+регион+residency+load); **Фаза 6 полностью** (proof-carrying +
-data-residency + FedAvg-по-регионам). Практически весь RoadMap 06 реализован. (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.
+Осталось по Фазе 5: **численный движок появился** (локальный `numeric_exec`, подмножество
+ops — MatMul/Add/Sub/Mul/Div/активации/Reshape/Transpose); далее — расширить набор ops и
+связать `execute_distributed` (через Node, чтобы обойти цикл network↔tensorlogic) с
+партиционированием графа по пирам.
+**Фаза 3** (RTT+регион+residency+load) и **Фаза 6** (proof + residency + FedAvg-регионы) — полностью. (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.
 Транспорты closed: block-fetch, gossipsub-wire, semantic-search, distributed_infer-over-wire.)
 
 ---
