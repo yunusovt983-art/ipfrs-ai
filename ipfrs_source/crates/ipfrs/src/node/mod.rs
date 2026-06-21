@@ -19,6 +19,7 @@ mod block_ops;
 mod core;
 mod dag_ops;
 mod geo_ops;
+mod models_ops;
 mod network_ops;
 mod pin_ops;
 mod repo_ops;

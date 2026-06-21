@@ -186,6 +186,9 @@ pub use blockfetch::{BlockRequest, BlockResponse};
 
 pub mod geo;
 
+pub mod models;
+pub use models::MODELS_TOPIC;
+
 pub mod block_transfer;
 pub use block_transfer::{
     BlockTransfer, StreamingBlockTransfer, TransferChunk, TransferDirection, TransferManagerStats,
