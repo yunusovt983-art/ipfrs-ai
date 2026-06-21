@@ -654,8 +654,14 @@ impl Node {
 
             match tokio::time::timeout(remaining, &mut response_rx).await {
                 Ok(Ok(resp)) => {
-                    // Fold the received response into the session.
-                    let peer_id = resp.request_id.clone();
+                    // Fold the received response into the session. Prefer the
+                    // responder's peer id (provenance, RoadMap Phase 6); fall
+                    // back to request_id for older responses.
+                    let peer_id = if resp.responder_peer_id.is_empty() {
+                        resp.request_id.clone()
+                    } else {
+                        resp.responder_peer_id.clone()
+                    };
                     let remote_result = RemoteResult {
                         peer_id,
                         bindings: resp.bindings.into_iter().flatten().collect(),
@@ -1622,6 +1628,7 @@ mod tests {
             bindings: vec![bindings.clone()],
             proof_found: true,
             error: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&resp).expect("serialize InferenceResponse");
@@ -1643,6 +1650,7 @@ mod tests {
             bindings: vec![],
             proof_found: false,
             error: Some("timeout".to_string()),
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&err_resp).expect("serialize error InferenceResponse");

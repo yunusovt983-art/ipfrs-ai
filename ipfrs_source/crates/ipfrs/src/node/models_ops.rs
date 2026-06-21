@@ -81,7 +81,7 @@ impl Node {
                         continue; // don't answer our own request
                     }
                     if let (Some(tl), Some(pubh)) = (&tensorlogic, &publisher) {
-                        let resp = serve_inference(&req, tl);
+                        let resp = serve_inference(&req, tl, &local_peer);
                         if let Ok(json) = serde_json::to_vec(&resp) {
                             pubh.publish(INFERENCE_RESULT_TOPIC, json);
                         }
@@ -119,10 +119,13 @@ impl Node {
 fn serve_inference(
     req: &InferenceRequest,
     tl: &ipfrs_tensorlogic::TensorLogicStore<super::NodeStore>,
+    local_peer: &str,
 ) -> InferenceResponse {
-    let bindings: Vec<HashMap<String, String>> = ipfrs_tensorlogic::parse_query(&req.goal)
-        .ok()
-        .and_then(|pred| tl.infer(&pred).ok())
+    let pred = ipfrs_tensorlogic::parse_query(&req.goal).ok();
+
+    let bindings: Vec<HashMap<String, String>> = pred
+        .as_ref()
+        .and_then(|p| tl.infer(p).ok())
         .map(|subs| {
             subs.into_iter()
                 .map(|s| {
@@ -133,10 +136,20 @@ fn serve_inference(
                 .collect()
         })
         .unwrap_or_default();
+
+    // Proof-carrying inference (RoadMap Phase 6): attach a serialized proof tree
+    // for explainability when the engine can produce one.
+    let proof_json = pred
+        .as_ref()
+        .and_then(|p| tl.prove(p).ok().flatten())
+        .and_then(|proof| serde_json::to_string(&proof).ok());
+
     InferenceResponse {
         request_id: req.request_id.clone(),
         proof_found: !bindings.is_empty(),
         bindings,
         error: None,
+        responder_peer_id: local_peer.to_string(),
+        proof_json,
     }
 }

@@ -39,7 +39,7 @@ pub struct InferenceRequest {
 }
 
 /// Wire format sent back by a remote peer in response to an [`InferenceRequest`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InferenceResponse {
     /// Matches the [`InferenceRequest::request_id`].
     pub request_id: String,
@@ -50,6 +50,14 @@ pub struct InferenceResponse {
     pub proof_found: bool,
     /// Non-`None` when the remote engine encountered an error.
     pub error: Option<String>,
+    /// Peer that produced this response — result provenance (RoadMap Phase 6).
+    /// Empty string when unknown.
+    #[serde(default)]
+    pub responder_peer_id: String,
+    /// Serialized proof (`Proof` as JSON) for explainability, when the engine
+    /// produced one (RoadMap Phase 6: proof-carrying inference).
+    #[serde(default)]
+    pub proof_json: Option<String>,
 }
 
 // ─── Session ────────────────────────────────────────────────────────────────
@@ -904,6 +912,7 @@ mod distributed_v2_tests {
             bindings: vec![bindings],
             proof_found: true,
             error: None,
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&resp).expect("serialize InferenceResponse");
@@ -927,6 +936,7 @@ mod distributed_v2_tests {
             bindings: vec![],
             proof_found: false,
             error: Some("depth limit exceeded".to_string()),
+            ..Default::default()
         };
 
         let json = serde_json::to_string(&resp).expect("serialize");
@@ -1125,6 +1135,7 @@ mod distributed_v2_tests {
                 bindings: vec![b],
                 proof_found: true,
                 error: None,
+                ..Default::default()
             })
             .await
             .expect("send");
