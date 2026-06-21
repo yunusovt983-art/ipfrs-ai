@@ -13,6 +13,18 @@
 # Project-specific
 .obsidian/
 
+# Vendored cool-japan snapshots (--depth 1, history stripped, ~173 MB).
+# Tracked as a DDD context map via the docs below; the source trees themselves
+# are NOT committed — re-clone deliberately (see Vendor/ARCHITECTURE.md §5).
+Vendor/oxigaf/
+Vendor/oxirag/
+Vendor/tensorlogic/
+Vendor/torsh/
+Vendor/trustformers/
+Vendor/ipfrs/
+Vendor/go-ethereum/
+Vendor/*/.DS_Store
+
 # Experimental wikis (different LLM models)
 Wiki_Arch_DeepSeek/
 Wiki_Arch_MiniMax/

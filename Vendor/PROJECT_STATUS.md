@@ -1,4 +1,24 @@
-# Cool Japan Vendor Layer Update - 2026-06-18
+# Cool Japan Vendor Layer Update - 2026-06-21
+
+**Status**: ✅ Complete
+**DDD context map**: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+**Repositories refreshed (latest layer, `--depth 1`)**: 5
+
+| Context | Subdomain | Commit | Upstream date | Size |
+|---------|-----------|--------|---------------|------|
+| tensorlogic  | Core (neural-symbolic)   | `0800acf` | 2026-06-09 | 23 MB |
+| trustformers | Core (transformers)      | `b815f2d` | 2026-06-21 | 94 MB |
+| torsh        | Generic (tensor/DL)      | `d6657ca` | 2026-04-27 | 70 MB |
+| oxirag       | Supporting (RAG)         | `4a6b504` | 2026-02-07 |  3 MB |
+| oxigaf       | Supporting (avatar/diff) | `2f885d3` | 2026-06-19 | 19 MB |
+
+The vendor layer is now organized as a DDD Context Map — see `ARCHITECTURE.md` for the
+strategic classification, context map, and integration rules. The 2026-06-18 section below
+(IPFRS + go-ethereum) is retained for history.
+
+---
+
+## History — 2026-06-18 (2 repos)
 
 **Status**: ✅ Complete  
 **Duration**: ~5 minutes  
