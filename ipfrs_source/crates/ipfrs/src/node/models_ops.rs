@@ -4,11 +4,13 @@
 //! CID in the DHT (so `find_providers`/`geo_fetch` can locate it) and **gossips**
 //! the CID on [`MODELS_TOPIC`] so subscribed peers learn about it immediately.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use ipfrs_core::{Cid, Result};
 use ipfrs_network::models::{decode_announcement, encode_announcement, MODELS_TOPIC};
-use ipfrs_network::NetworkEvent;
+use ipfrs_network::{NetworkEvent, INFERENCE_REQUEST_TOPIC, INFERENCE_RESULT_TOPIC};
+use ipfrs_tensorlogic::{InferenceRequest, InferenceResponse};
 
 use super::Node;
 
@@ -48,17 +50,51 @@ impl Node {
     /// successful take is a no-op. Call once after `start()`, typically alongside
     /// [`Node::subscribe_models`]. The task ends when the network shuts down.
     pub fn start_model_consumer(&mut self) -> Result<()> {
+        // Capture handles for inference serving/correlation before taking the rx.
+        let tensorlogic = self.tensorlogic().ok().map(Arc::clone);
+        let publisher = self.network()?.topic_publisher();
+        let inference_waiters = Arc::clone(&self.network()?.inference_waiters);
+        let local_peer = self.network()?.peer_id().to_string();
+
         let mut rx = match self.network_mut()?.take_event_receiver() {
             Some(rx) => rx,
             None => return Ok(()), // already taken / consumer already running
         };
         let registry = Arc::clone(&self.known_models);
+
         tokio::spawn(async move {
             while let Some(ev) = rx.recv().await {
-                if let NetworkEvent::GossipMessage { topic, data, .. } = ev {
-                    if topic == MODELS_TOPIC {
-                        if let Some(cid) = decode_announcement(&data) {
-                            *registry.write().entry(cid).or_insert(0) += 1;
+                let NetworkEvent::GossipMessage { topic, data, .. } = ev else {
+                    continue;
+                };
+                if topic == MODELS_TOPIC {
+                    // Model announcement → record in the known-models registry.
+                    if let Some(cid) = decode_announcement(&data) {
+                        *registry.write().entry(cid).or_insert(0) += 1;
+                    }
+                } else if topic == INFERENCE_REQUEST_TOPIC {
+                    // Serve a remote inference request from the local KB (Phase 1.2).
+                    let Ok(req) = serde_json::from_slice::<InferenceRequest>(&data) else {
+                        continue;
+                    };
+                    if req.requester_peer_id == local_peer {
+                        continue; // don't answer our own request
+                    }
+                    if let (Some(tl), Some(pubh)) = (&tensorlogic, &publisher) {
+                        let resp = serve_inference(&req, tl);
+                        if let Ok(json) = serde_json::to_vec(&resp) {
+                            pubh.publish(INFERENCE_RESULT_TOPIC, json);
+                        }
+                    }
+                } else if topic == INFERENCE_RESULT_TOPIC {
+                    // Deliver a remote response to any waiter registered by
+                    // distributed_infer (correlated by request_id).
+                    if let Ok(resp) = serde_json::from_slice::<InferenceResponse>(&data) {
+                        let mut waiters = inference_waiters.lock().await;
+                        if let Some(senders) = waiters.remove(&resp.request_id) {
+                            for tx in senders {
+                                let _ = tx.send(resp.clone());
+                            }
                         }
                     }
                 }
@@ -75,5 +111,32 @@ impl Node {
     /// How many times a given model CID has been announced (0 if unseen).
     pub fn model_announcement_count(&self, cid: &Cid) -> u32 {
         self.known_models.read().get(cid).copied().unwrap_or(0)
+    }
+}
+
+/// Run a remote inference request against the local KB and build the wire
+/// response (RoadMap Phase 1.2). Pure helper used by the gossip consumer.
+fn serve_inference(
+    req: &InferenceRequest,
+    tl: &ipfrs_tensorlogic::TensorLogicStore<super::NodeStore>,
+) -> InferenceResponse {
+    let bindings: Vec<HashMap<String, String>> = ipfrs_tensorlogic::parse_query(&req.goal)
+        .ok()
+        .and_then(|pred| tl.infer(&pred).ok())
+        .map(|subs| {
+            subs.into_iter()
+                .map(|s| {
+                    s.into_iter()
+                        .map(|(k, v)| (k, v.to_string()))
+                        .collect::<HashMap<String, String>>()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    InferenceResponse {
+        request_id: req.request_id.clone(),
+        proof_found: !bindings.is_empty(),
+        bindings,
+        error: None,
     }
 }

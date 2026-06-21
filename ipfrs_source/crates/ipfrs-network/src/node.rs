@@ -66,6 +66,28 @@ pub type SemSearchProvider = Arc<
 type PendingSemSearch =
     Arc<Mutex<HashMap<OutboundRequestId, oneshot::Sender<IpfrsResult<Vec<(String, f32)>>>>>>;
 
+/// Gossipsub topic carrying `InferenceRequest` (JSON) over the wire (Phase 1.2 → inference).
+pub const INFERENCE_REQUEST_TOPIC: &str = "/ipfrs/inference/req";
+/// Gossipsub topic carrying `InferenceResponse` (JSON) over the wire.
+pub const INFERENCE_RESULT_TOPIC: &str = "/ipfrs/inference/res";
+
+/// Cheaply-cloneable handle to publish on gossipsub topics from a background
+/// task (e.g. the gossip consumer) without holding the whole `NetworkNode`.
+#[derive(Clone)]
+pub struct TopicPublisher {
+    tx: mpsc::Sender<SwarmCommand>,
+}
+
+impl TopicPublisher {
+    /// Best-effort publish of `data` on `topic` (drops if the channel is full).
+    pub fn publish(&self, topic: &str, data: Vec<u8>) {
+        let _ = self.tx.try_send(SwarmCommand::Publish {
+            topic: topic.to_string(),
+            data,
+        });
+    }
+}
+
 /// Derive a coarse region tag from a peer's multiaddr (RoadMap Phase 3).
 ///
 /// Returns `"local"` (loopback), `"lan"` (private), or a public zone
@@ -2102,6 +2124,8 @@ impl NetworkNode {
         let json = serde_json::to_vec(request).map_err(|e| {
             ipfrs_core::error::Error::Network(format!("Failed to serialize InferenceRequest: {e}"))
         })?;
+        // Real wire fan-out (RoadMap 1.2): publish over libp2p gossipsub too.
+        let _ = self.publish_topic(INFERENCE_REQUEST_TOPIC, json.clone());
         let peer_id_str = self.peer_id.to_string();
         self.gossipsub
             .publish_inference_request(&json, &peer_id_str)
@@ -2110,6 +2134,21 @@ impl NetworkNode {
                     "GossipSub publish_inference_request failed: {e}"
                 ))
             })
+    }
+
+    /// Subscribe to the wire inference topics so this node both serves remote
+    /// `InferenceRequest`s and receives `InferenceResponse`s (RoadMap 1.2).
+    pub fn subscribe_inference(&self) -> IpfrsResult<()> {
+        self.subscribe_topic(INFERENCE_REQUEST_TOPIC)?;
+        self.subscribe_topic(INFERENCE_RESULT_TOPIC)
+    }
+
+    /// A cloneable handle for publishing on gossipsub topics from a background
+    /// task. `None` before `start()` (the command channel is not yet open).
+    pub fn topic_publisher(&self) -> Option<TopicPublisher> {
+        self.swarm_cmd_tx
+            .as_ref()
+            .map(|tx| TopicPublisher { tx: tx.clone() })
     }
 
     /// Register a one-shot waiter that will be resolved when an
@@ -2156,6 +2195,8 @@ impl NetworkNode {
         let json = serde_json::to_vec(response).map_err(|e| {
             ipfrs_core::error::Error::Network(format!("Failed to serialize InferenceResponse: {e}"))
         })?;
+        // Real wire fan-out (RoadMap 1.2): publish over libp2p gossipsub too.
+        let _ = self.publish_topic(INFERENCE_RESULT_TOPIC, json.clone());
         let peer_id_str = self.peer_id.to_string();
         self.gossipsub
             .publish_inference_result(&json, &peer_id_str)

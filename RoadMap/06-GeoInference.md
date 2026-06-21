@@ -34,15 +34,16 @@ updated: 2026-06-19
 | **Анонс моделей** — `announce_model` (provide + gossip `/ipfrs/models`) / `subscribe_models` | `ipfrs-network/src/models.rs`, `ipfrs/src/node/models_ops.rs` | `dd58458` |
 | **Фоновый consumer** — `start_model_consumer` → реестр `known_models` из gossip | `ipfrs/src/node/models_ops.rs` | `24d0d0a` |
 | **gRPC-проброс** — `GeoService.GeoFetch` (proto + tonic) | `ipfrs-interface/proto/geo.proto`, `src/grpc.rs` (`--features grpc`) | `6a7b52e` |
-| **Фаза 1.3** — semantic-DHT transport (`/ipfrs/semsearch/1.0.0`) + распределённый поиск | `ipfrs-network/src/semsearch.rs`, `node.rs`; `ipfrs/src/node/semantic_ops.rs` | _текущий_ |
+| **Фаза 1.3** — semantic-DHT transport (`/ipfrs/semsearch/1.0.0`) + распределённый поиск | `ipfrs-network/src/semsearch.rs`, `node.rs`; `ipfrs/src/node/semantic_ops.rs` | `c6f729a` |
+| **distributed_infer → wire** — публикация запросов/ответов по реальному gossipsub + серв/доставка в consumer | `ipfrs-network/src/node.rs`, `ipfrs/src/node/models_ops.rs` | _текущий_ |
 
 Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4, region 4/4, models 3/3; `cargo check --workspace` зелёный.
 Полный цикл замкнут: `announce_model` → gossip `/ipfrs/models` → `start_model_consumer` →
 `known_models` → `geo_fetch_block(cid)`.
-Осталось по фазам: 3 (нагрузка/load), 5 (исполнение), 6 (proof/FedAvg/residency);
-переключить `distributed_infer` со in-process на wire-gossipsub. (Внешние API:
-GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅. Транспорты closed: block-fetch,
-gossipsub, semantic-search.)
+Осталось по фазам: 3 (нагрузка/load), 5 (распределённое исполнение графа — заблокировано
+отсутствием численного tensor-executor'а + циклом network↔tensorlogic), 6 (proof/FedAvg/
+residency). (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.
+Транспорты closed: block-fetch, gossipsub-wire, semantic-search, distributed_infer-over-wire.)
 
 ---
 

@@ -40,6 +40,7 @@ tracing-opentelemetry = { workspace = true }
 
 # Utilities
 serde = { workspace = true }
+serde_json = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
 thiserror = { workspace = true }

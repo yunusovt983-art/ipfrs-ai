@@ -485,7 +485,8 @@ pub use network_simulator::{
 pub use node::{
     BucketInfo, ConnectionEndpoint, InferenceWaiters, KademliaConfig, NatTraversalMetrics,
     NetworkConfig, NetworkEvent, NetworkHealthLevel, NetworkHealthSummary, NetworkNode,
-    NetworkStats, RelayConfig, RoutingTableInfo,
+    NetworkStats, RelayConfig, RoutingTableInfo, TopicPublisher, INFERENCE_REQUEST_TOPIC,
+    INFERENCE_RESULT_TOPIC,
 };
 pub use offline_queue::{
     OfflineQueue, OfflineQueueConfig, OfflineQueueError, OfflineQueueStats, QueuedRequest,
