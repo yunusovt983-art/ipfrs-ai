@@ -114,6 +114,59 @@ graph TD
 
 ---
 
+## Geo-инференс — детальный поток (ANSI)
+
+Полный цикл «публикация → анонс → обнаружение → гео-фетч» между двумя узлами.
+Реализовано в коде (RoadMap [06-GeoInference](RoadMap/06-GeoInference.md)).
+
+```text
+  УЗЕЛ A (публикует)         DHT / gossipsub (libp2p)         УЗЕЛ B (запрашивает)
+  ══════════════════         ════════════════════════         ════════════════════
+
+  announce_model(cid)
+    │
+    ├─ provide(cid) ─────────▶ ┌────────────────────┐
+    │                          │  Kademlia DHT       │
+    │                          │  cid → [provider A] │
+    │                          └────────────────────┘
+    │
+    └─ publish(cid) ─────────▶ ┌────────────────────┐
+                               │ gossip /ipfrs/models│──┐
+                               └────────────────────┘  │  (по проводу)
+                                                        ▼
+                                          start_model_consumer (фоновая задача)
+                                          GossipMessage → decode → known_models[cid]++
+                                                        │
+                                       ┌────────────────┘
+                                       ▼  (позже, по запросу пользователя)
+                                  geo_fetch_block(cid)
+                                       │
+                  find_providers(cid)  │
+       ┌────────────────────┐  ◀───────┤
+       │  Kademlia DHT       │          │
+       │  → providers=[A,…]  │ ─────────▶ candidates[]
+       └────────────────────┘          │
+                                  plan_routing(RTT, region)   ← Phase 3 метрики
+                                  → primary = A  (+ k-1 hedge)
+                                       │
+   ┌──────────────────┐  Request{cid}  │
+   │ blockfetch        │ ◀──────────────┤  /ipfrs/blockfetch/1.0.0 (CBOR)
+   │ store.get(cid)    │                │
+   │ → bytes           │                │
+   └────────┬─────────┘                │
+            │  Response Block(data)     ▼
+            └─────────────────────────▶ verify  cid == hash(data)  ✓
+                                        backfill в локальный store
+                                        return Block
+```
+
+**Ключевые свойства:** провайдинг через DHT (`provide`), анонс по gossipsub
+(`/ipfrs/models`), приём фоновым consumer'ом, выбор пира по измеренному RTT +
+региону (`plan_routing`), выкачка по `/ipfrs/blockfetch/1.0.0` с проверкой
+целостности `cid == hash(data)`. Внешне доступно как GraphQL `geo_fetch(cid)`.
+
+---
+
 ## CID — универсальный токен границы
 
 ```mermaid
@@ -393,13 +446,13 @@ graph TD
 | `IPFRS_ARCHITECTURE.md` | 1 | 1,599 |
 | `Wiki_GLM/` | 2 | 1,544 |
 | `RoadMap/` | 10 | 2,109 |
-| `README.md` (корень) | 1 | 516 |
+| `README.md` (корень) | 1 | 569 |
 | `CONTRIBUTORS.md` | 1 | 18 |
-| **Итого (архитектура)** | **61** | **23,717** |
+| **Итого (архитектура)** | **61** | **23,770** |
 
-> **23,717 строк** документации архитектуры в **61 Markdown-файле** (7 баз знаний + корневые доки + RoadMap с geo-инференсом).  
+> **23,770 строк** документации архитектуры в **61 Markdown-файле** (7 баз знаний + корневые доки + RoadMap с geo-инференсом).  
 > **3 «живые» вики**: [`Wiki/`](Wiki/00-INDEX.md) (DDD, выверена по коду), [`Wiki_Antropic/`](Wiki_Antropic/INDEX.md) (доменные статьи), [`Wiki_Arch_GLM/`](Wiki_Arch_GLM/00-INDEX.md) (GLM-вариант — **все 6 доменных контекстов выверены по коду**, `06-LogicContext` = 1356 строк).  
-> Всего Markdown в репозитории (без `target/`, `Vendor/`): **135 файлов, 58,096 строк** — остальное это доки исходников и служебное.  
+> Всего Markdown в репозитории (без `target/`, `Vendor/`): **135 файлов, 58,149 строк** — остальное это доки исходников и служебное.  
 > _Пересчитано 2026-06-19 — выверено по рабочему дереву._
 
 ---
