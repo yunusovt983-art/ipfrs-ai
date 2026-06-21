@@ -189,6 +189,8 @@ pub mod geo;
 pub mod models;
 pub use models::MODELS_TOPIC;
 
+pub mod semsearch;
+
 pub mod block_transfer;
 pub use block_transfer::{
     BlockTransfer, StreamingBlockTransfer, TransferChunk, TransferDirection, TransferManagerStats,

@@ -217,4 +217,79 @@ impl Node {
         let semantic = self.semantic()?;
         semantic.load_index(path).await
     }
+
+    // ── Distributed semantic search (RoadMap Phase 1.3) ─────────────────────
+
+    /// Wire inbound semantic-search requests (`/ipfrs/semsearch/1.0.0`) to the
+    /// local index, so peers can query this node. Forces semantic init.
+    pub fn enable_distributed_semantic(&self) -> Result<()> {
+        let router = std::sync::Arc::clone(self.semantic()?);
+        self.network()?.set_semsearch_provider(std::sync::Arc::new(
+            move |embedding: Vec<f32>, k: u32| {
+                let router = router.clone();
+                Box::pin(async move {
+                    router
+                        .query(&embedding, k as usize)
+                        .await
+                        .map(|res| {
+                            res.into_iter()
+                                .map(|r| (r.cid.to_string(), r.score))
+                                .collect::<Vec<(String, f32)>>()
+                        })
+                        .unwrap_or_default()
+                })
+                    as std::pin::Pin<
+                        Box<dyn std::future::Future<Output = Vec<(String, f32)>> + Send>,
+                    >
+            },
+        ));
+        Ok(())
+    }
+
+    /// Distributed k-NN search: query the local index plus all connected peers
+    /// over the wire, merge by CID (keeping the best score), and return the
+    /// top-`k` as `(cid, score)` (RoadMap Phase 1.3).
+    pub async fn semantic_search_distributed(
+        &self,
+        query: &[f32],
+        k: usize,
+    ) -> Result<Vec<(String, f32)>> {
+        use std::collections::HashMap;
+
+        let mut best: HashMap<String, f32> = HashMap::new();
+        let mut merge = |cid: String, score: f32| {
+            best.entry(cid)
+                .and_modify(|s| {
+                    if score > *s {
+                        *s = score;
+                    }
+                })
+                .or_insert(score);
+        };
+
+        // Local results (best-effort; the semantic index may be empty).
+        if let Ok(local) = self.search_similar(query, k).await {
+            for r in local {
+                merge(r.cid.to_string(), r.score);
+            }
+        }
+
+        // Peer results over /ipfrs/semsearch/1.0.0.
+        let network = self.network()?;
+        for peer in network.connected_peers() {
+            if let Ok(hits) = network
+                .query_peer_semantic(&peer, query.to_vec(), k as u32)
+                .await
+            {
+                for (cid, score) in hits {
+                    merge(cid, score);
+                }
+            }
+        }
+
+        let mut merged: Vec<(String, f32)> = best.into_iter().collect();
+        merged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        merged.truncate(k);
+        Ok(merged)
+    }
 }
