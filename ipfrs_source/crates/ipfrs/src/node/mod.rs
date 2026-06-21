@@ -43,6 +43,11 @@ pub struct Node {
     pub(super) tls_manager: Option<Arc<TlsManager>>,
     pub(super) pin_manager: Arc<PinManager>,
     pub(super) startup_time: Option<SystemTime>,
+    /// Registry of model CIDs learned from gossip announcements on
+    /// `/ipfrs/models` (RoadMap Phase 1.2 + 2): CID → times announced.
+    /// Populated by the background consumer started via `start_model_consumer`.
+    pub(super) known_models:
+        Arc<parking_lot::RwLock<std::collections::HashMap<ipfrs_core::Cid, u32>>>,
     /// Prometheus metrics for this node instance.
     ///
     /// All block operations, DHT calls, inference sessions, GossipSub events,

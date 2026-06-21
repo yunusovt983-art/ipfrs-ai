@@ -119,6 +119,7 @@ impl Node {
             tls_manager: None,
             pin_manager: Arc::new(PinManager::new()),
             startup_time: None,
+            known_models: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
             metrics,
         })
     }
