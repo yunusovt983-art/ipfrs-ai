@@ -247,49 +247,118 @@ impl Node {
     }
 
     /// Distributed k-NN search: query the local index plus all connected peers
-    /// over the wire, merge by CID (keeping the best score), and return the
-    /// top-`k` as `(cid, score)` (RoadMap Phase 1.3).
+    /// over the wire, fuse the per-source rankings with **Reciprocal Rank
+    /// Fusion**, and return the top-`k` as `(cid, score)` (RoadMap Phase 1.3).
+    ///
+    /// Each source (the local index and every peer) is treated as an
+    /// independent ranked list. RRF combines them by rank rather than by raw
+    /// score, so heterogeneous score scales across peers no longer need
+    /// normalization, and a CID that ranks well on several peers outranks one
+    /// that merely has a single high score. This reuses the retrieval
+    /// subdomain's existing [`ResultAggregator`] instead of a naive best-score
+    /// merge. The returned `score` is the fused RRF score (not a cosine
+    /// similarity).
     pub async fn semantic_search_distributed(
         &self,
         query: &[f32],
         k: usize,
     ) -> Result<Vec<(String, f32)>> {
+        use ipfrs_network::CallResult;
+        use ipfrs_semantic::{
+            AggAggregationStrategy, AggSearchResult, AggregatorConfig, ResultAggregator,
+        };
         use std::collections::HashMap;
+        use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-        let mut best: HashMap<String, f32> = HashMap::new();
-        let mut merge = |cid: String, score: f32| {
-            best.entry(cid)
-                .and_modify(|s| {
-                    if score > *s {
-                        *s = score;
-                    }
+        // Epoch-millis clock the circuit breaker reasons about (timeouts, cooldowns).
+        let now_ms = || {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        };
+
+        let mut aggregator = ResultAggregator::new(AggregatorConfig {
+            strategy: AggAggregationStrategy::RankFusion,
+            max_results: k,
+            ..AggregatorConfig::default()
+        });
+
+        let into_agg = |source: &str, hits: Vec<(String, f32)>| -> Vec<AggSearchResult> {
+            hits.into_iter()
+                .map(|(cid, score)| AggSearchResult {
+                    doc_id: cid,
+                    score: score as f64,
+                    source: source.to_string(),
+                    metadata: HashMap::new(),
                 })
-                .or_insert(score);
+                .collect()
         };
 
         // Local results (best-effort; the semantic index may be empty).
         if let Ok(local) = self.search_similar(query, k).await {
-            for r in local {
-                merge(r.cid.to_string(), r.score);
-            }
+            let hits = local
+                .into_iter()
+                .map(|r| (r.cid.to_string(), r.score))
+                .collect();
+            aggregator.add_results("local", into_agg("local", hits));
         }
 
-        // Peer results over /ipfrs/semsearch/1.0.0.
+        // Peer results over /ipfrs/semsearch/1.0.0 — each peer is its own source,
+        // guarded by a per-peer circuit breaker so a flaky peer is skipped while
+        // its breaker is Open instead of being re-queried on every search.
         let network = self.network()?;
         for peer in network.connected_peers() {
-            if let Ok(hits) = network
-                .query_peer_semantic(&peer, query.to_vec(), k as u32)
-                .await
+            let source = peer.to_string();
+
+            // Skip peers whose breaker is Open (cooldown not yet elapsed).
+            if !self
+                .semsearch_breaker
+                .lock()
+                .can_call(&source, now_ms())
             {
-                for (cid, score) in hits {
-                    merge(cid, score);
+                continue;
+            }
+
+            let started = Instant::now();
+            let outcome = network
+                .query_peer_semantic(&peer, query.to_vec(), k as u32)
+                .await;
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+
+            let call_result = match &outcome {
+                Ok(_) => CallResult::Success {
+                    duration_ms: elapsed_ms,
+                },
+                Err(e) => {
+                    let reason = e.to_string();
+                    if reason.contains("timed out") {
+                        CallResult::Timeout {
+                            duration_ms: elapsed_ms,
+                        }
+                    } else {
+                        CallResult::Failure {
+                            duration_ms: elapsed_ms,
+                            reason,
+                        }
+                    }
                 }
+            };
+            self.semsearch_breaker
+                .lock()
+                .record_result(&source, call_result, now_ms());
+
+            if let Ok(hits) = outcome {
+                let results = into_agg(&source, hits);
+                aggregator.add_results(&source, results);
             }
         }
 
-        let mut merged: Vec<(String, f32)> = best.into_iter().collect();
-        merged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        merged.truncate(k);
+        let merged = aggregator
+            .aggregate()
+            .into_iter()
+            .map(|r| (r.doc_id, r.final_score as f32))
+            .collect();
         Ok(merged)
     }
 }

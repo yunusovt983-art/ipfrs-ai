@@ -120,6 +120,11 @@ impl Node {
             pin_manager: Arc::new(PinManager::new()),
             startup_time: None,
             known_models: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+            semsearch_breaker: Arc::new(parking_lot::Mutex::new(
+                ipfrs_network::CircuitBreakerRegistry::new(
+                    ipfrs_network::CircuitConfig::default(),
+                ),
+            )),
             metrics,
         })
     }

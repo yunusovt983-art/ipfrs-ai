@@ -48,6 +48,12 @@ pub struct Node {
     /// Populated by the background consumer started via `start_model_consumer`.
     pub(super) known_models:
         Arc<parking_lot::RwLock<std::collections::HashMap<ipfrs_core::Cid, u32>>>,
+    /// Per-peer circuit breakers for the distributed semantic-search fan-out
+    /// (RoadMap Phase 1.3 resilience). A peer that repeatedly fails or times
+    /// out trips Open and is skipped on subsequent distributed searches until
+    /// its cooldown elapses, so one flaky peer can't drag down every query.
+    pub(super) semsearch_breaker:
+        Arc<parking_lot::Mutex<ipfrs_network::CircuitBreakerRegistry>>,
     /// Prometheus metrics for this node instance.
     ///
     /// All block operations, DHT calls, inference sessions, GossipSub events,
