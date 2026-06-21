@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "proto/dag.proto",
                     "proto/file.proto",
                     "proto/tensor.proto",
+                    "proto/geo.proto",
                 ],
                 &["proto"],
             )?;
@@ -35,6 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "proto/dag.proto",
                     "proto/file.proto",
                     "proto/tensor.proto",
+                    "proto/geo.proto",
                 ],
                 &["proto"],
             )?;

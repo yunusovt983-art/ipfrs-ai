@@ -193,6 +193,6 @@ pub use zerocopy::ZeroCopyBuffer;
 pub use grpc::{
     backpressure_support, AuthInterceptor, BlockServiceImpl, BlockServiceServer,
     ChainedInterceptor, DagServiceImpl, DagServiceServer, FileServiceImpl, FileServiceServer,
-    GrpcServiceConfig, LoggingInterceptor, MetricsInterceptor, RateLimitInterceptor,
-    TensorServiceImpl, TensorServiceServer,
+    GeoServiceImpl, GeoServiceServer, GrpcServiceConfig, LoggingInterceptor, MetricsInterceptor,
+    RateLimitInterceptor, TensorServiceImpl, TensorServiceServer,
 };

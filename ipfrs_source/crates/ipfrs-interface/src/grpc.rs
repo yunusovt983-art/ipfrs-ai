@@ -24,6 +24,9 @@ pub mod proto {
     pub mod tensor {
         tonic::include_proto!("ipfrs.tensor.v1");
     }
+    pub mod geo {
+        tonic::include_proto!("ipfrs.geo.v1");
+    }
 }
 
 // Import block types with specific names to avoid ambiguity
@@ -57,11 +60,15 @@ use proto::tensor::{
     TensorMetadata, TensorStatsResponse, TensorStreamRequest, TensorStreamResponse,
 };
 
+// Geo-distributed inference service (RoadMap Phase 4)
+use proto::geo::{geo_service_server, GeoFetchRequest, GeoFetchResponse};
+
 // Re-export server wrapper types so callers can build tonic routers without
 // having to import the generated proto module directly.
 pub use proto::block::block_service_server::BlockServiceServer;
 pub use proto::dag::dag_service_server::DagServiceServer;
 pub use proto::file::file_service_server::FileServiceServer;
+pub use proto::geo::geo_service_server::GeoServiceServer;
 pub use proto::tensor::tensor_service_server::TensorServiceServer;
 
 /// Request validation module for gRPC services
@@ -972,6 +979,54 @@ impl tensor_service_server::TensorService for TensorServiceImpl {
 
         let out_stream = tokio_stream::wrappers::ReceiverStream::new(rx);
         Ok(Response::new(Box::pin(out_stream)))
+    }
+}
+
+// ── GeoService (RoadMap Phase 4: geo-distributed block fetch over gRPC) ──────
+
+/// gRPC service exposing geo-aware block fetch, backed by a live `NetworkNode`.
+pub struct GeoServiceImpl {
+    network: Arc<tokio::sync::Mutex<ipfrs_network::NetworkNode>>,
+}
+
+impl GeoServiceImpl {
+    /// Create the service over a shared network handle.
+    pub fn new(network: Arc<tokio::sync::Mutex<ipfrs_network::NetworkNode>>) -> Self {
+        Self { network }
+    }
+}
+
+#[tonic::async_trait]
+impl geo_service_server::GeoService for GeoServiceImpl {
+    async fn geo_fetch(
+        &self,
+        request: Request<GeoFetchRequest>,
+    ) -> Result<Response<GeoFetchResponse>, Status> {
+        let req = request.into_inner();
+        let cid = req
+            .cid
+            .parse::<ipfrs_core::Cid>()
+            .map_err(|e| Status::invalid_argument(format!("invalid CID: {}", e)))?;
+
+        let mut policy = ipfrs_network::geo::RoutingPolicy::default();
+        if req.hedge_k > 0 {
+            policy.hedge_k = req.hedge_k as usize;
+        }
+
+        let mut guard = self.network.lock().await;
+        match guard.geo_fetch_block(&cid, &policy).await {
+            Ok(block) => Ok(Response::new(GeoFetchResponse {
+                found: true,
+                data: block.data().to_vec(),
+                size: block.size(),
+            })),
+            // No provider / not retrievable → found=false (not a transport error).
+            Err(_) => Ok(Response::new(GeoFetchResponse {
+                found: false,
+                data: Vec::new(),
+                size: 0,
+            })),
+        }
     }
 }
 

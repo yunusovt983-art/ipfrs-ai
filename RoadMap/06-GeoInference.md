@@ -33,13 +33,14 @@ updated: 2026-06-19
 | **Фаза 1.2** — реальный libp2p gossipsub по проводу (subscribe/publish/event) | `ipfrs-network/src/node.rs` (`gossipsub` behaviour) | `13c278a` |
 | **Анонс моделей** — `announce_model` (provide + gossip `/ipfrs/models`) / `subscribe_models` | `ipfrs-network/src/models.rs`, `ipfrs/src/node/models_ops.rs` | `dd58458` |
 | **Фоновый consumer** — `start_model_consumer` → реестр `known_models` из gossip | `ipfrs/src/node/models_ops.rs` | `24d0d0a` |
+| **gRPC-проброс** — `GeoService.GeoFetch` (proto + tonic) | `ipfrs-interface/proto/geo.proto`, `src/grpc.rs` (`--features grpc`) | _текущий_ |
 
 Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4, region 4/4, models 3/3; `cargo check --workspace` зелёный.
 Полный цикл замкнут: `announce_model` → gossip `/ipfrs/models` → `start_model_consumer` →
 `known_models` → `geo_fetch_block(cid)`.
 Осталось по фазам: 1.3 semantic-DHT transport, 3 (нагрузка/load), 5 (исполнение),
-6 (proof/FedAvg/residency); проброс в **gRPC** (GraphQL — готово); переключить
-`distributed_infer` со in-process на wire-gossipsub.
+6 (proof/FedAvg/residency); переключить `distributed_infer` со in-process на
+wire-gossipsub. (Внешние API: GraphQL `geo_fetch` ✅ + gRPC `GeoService.GeoFetch` ✅.)
 
 ---
 

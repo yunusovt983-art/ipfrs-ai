@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package ipfrs.geo.v1;
+
+// GeoService exposes geo-distributed inference operations (RoadMap Phase 4).
+service GeoService {
+  // GeoFetch resolves providers of a content-addressed block (e.g. a model
+  // manifest), ranks them by geo metrics (RTT/region), and fetches it from the
+  // best peer over the block-fetch protocol.
+  rpc GeoFetch(GeoFetchRequest) returns (GeoFetchResponse);
+}
+
+// GeoFetchRequest asks for a block by CID with an optional hedge fan-out.
+message GeoFetchRequest {
+  string cid = 1;
+  // Number of peers to hedge across (0 = use policy default).
+  uint32 hedge_k = 2;
+}
+
+// GeoFetchResponse returns the fetched block, or found=false if unavailable.
+message GeoFetchResponse {
+  bool found = 1;
+  bytes data = 2;
+  uint64 size = 3;
+}
