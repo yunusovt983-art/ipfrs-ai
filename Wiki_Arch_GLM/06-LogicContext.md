@@ -898,33 +898,33 @@ pub fn aggregate_secure(&self, gradients: &[Vec<f32>]) -> Result<Vec<f32>, Gradi
 
 ### Сводная таблица 25 движков
 
-| # | Движок | Тип | Алгоритм | Источник |
-|---|--------|-----|----------|----------|
-| 1 | `InferenceEngine` | дедуктивный | SLD-резолюция + унификация | `reasoning.rs:221,259` |
-| 2 | `MemoizedInferenceEngine` | дедуктивный | SLD + кэш по QueryKey | `reasoning.rs:632,657` |
-| 3 | `TabledInferenceEngine` | дедуктивный | SLG-табуляция (recursion-safe) | `recursive_reasoning.rs:101,130` |
-| 4 | `FixpointEngine` / `StratificationAnalyzer` | дедуктивный | стратифицированный Datalog-fixpoint | `recursive_reasoning.rs:312,482` |
-| 5 | `DistributedBackwardChainer` | распределённый | обратный вывод + делегирование пирам по CID | `distributed_backward_chainer.rs:33,66` |
-| 6 | `TemporalReasoningEngine` | темпоральный | 13 интервальных отношений Аллена | `temporal_reasoning.rs:293,100` |
-| 7 | `FuzzyLogicEngine` | нечёткий | Mamdani/Sugeno + дефаззификация | `fuzzy_logic.rs:325,456` |
-| 8 | `FleFuzzyLogicEngine` | нечёткий | полный Mamdani, 7 MF, 5 дефаззификаций | `fuzzy_logic_engine/types.rs:380,496` |
-| 9 | `EpistemicLogicReasoner` | модальный | S5 Kripke model-checking, K/M/E/C | `epistemic_logic.rs:210,332` |
-| 10 | `ProbabilisticLogicNetwork` | вероятностный | PLN, truth values (strength, confidence) | `probabilistic_logic_network.rs:483,577` |
-| 11 | `BayesianNetworkInference` | вероятностный | VE / Belief Propagation / Sampling | `bayesian_network_inference.rs:575,665` |
-| 12 | `BayesianUpdateEngine` | вероятностный | сопряжённые приоры (Beta/Gauss/Dirichlet/Gamma) | `bayesian_updater.rs:335,357` |
-| 13 | `AbductiveReasoningEngine` | абдуктивный | branch-and-bound по гипотезам | `abductive_reasoning_engine.rs:392,476` |
-| 14 | `CausalInferenceEngine` | каузальный | do-исчисление Пёрла + контрфактика | `causal_inference.rs:244,573` |
-| 15 | `ConstraintSolver` | CSP | AC-3 + backtracking + MRV/LCV | `constraint_solver.rs:322,764` |
-| 16 | `BeliefRevisionEngine` | ревизия | AGM expansion/contraction/Levi-revision | `belief_revision_engine.rs:336,487` |
-| 17 | `ConstraintPropagationEngine` | CSP | AC3/AC4/AC6 + bounds propagation | `constraint_propagation_engine/types_3.rs:16,93` |
-| 18 | `MarkovDecisionProcess` | планирование | value/policy iteration (Беллман) | `markov_decision_process/types.rs:150,259` |
-| 19 | `ReinforcementLearningAgent` | RL | SARSA/Q/Expected-SARSA/Double-Q/N-step | `reinforcement_learning_agent.rs:53,201` |
-| 20 | `ReinforcementLearner` | RL | Q/SARSA/Double-Q (упрощённый) | `reinforcement_learner.rs:217,386` |
-| 21 | `HypothesisTestEngine` | статистика | z/t-тесты, χ², тесты долей | `hypothesis_test_engine/types.rs:73,107` |
-| 22 | `ProbabilisticProgramEngine` | вероятностный | MCMC: MH/Gibbs/Importance/Rejection | `probabilistic_program_engine/ppe_types.rs:131` |
-| 23 | `NeuralSymbolicIntegrator` | гибридный | смесь нейро + символика | `neural_symbolic.rs:227,474` |
-| 24 | `DecisionTreeLearner` | индуктивный | ID3/C4.5 (Entropy/Gini), прунинг | `decision_tree_learner.rs:334,396` |
-| 25 | `EnsembleLearner` | индуктивный | Bagging/AdaBoost/GradBoost/RF/Stacking | `ensemble_learner/types.rs:217,266` |
+| #   | Движок                                      | Тип            | Алгоритм                                        | Источник                                         |
+| --- | ------------------------------------------- | -------------- | ----------------------------------------------- | ------------------------------------------------ |
+| 1   | `InferenceEngine`                           | дедуктивный    | SLD-резолюция + унификация                      | `reasoning.rs:221,259`                           |
+| 2   | `MemoizedInferenceEngine`                   | дедуктивный    | SLD + кэш по QueryKey                           | `reasoning.rs:632,657`                           |
+| 3   | `TabledInferenceEngine`                     | дедуктивный    | SLG-табуляция (recursion-safe)                  | `recursive_reasoning.rs:101,130`                 |
+| 4   | `FixpointEngine` / `StratificationAnalyzer` | дедуктивный    | стратифицированный Datalog-fixpoint             | `recursive_reasoning.rs:312,482`                 |
+| 5   | `DistributedBackwardChainer`                | распределённый | обратный вывод + делегирование пирам по CID     | `distributed_backward_chainer.rs:33,66`          |
+| 6   | `TemporalReasoningEngine`                   | темпоральный   | 13 интервальных отношений Аллена                | `temporal_reasoning.rs:293,100`                  |
+| 7   | `FuzzyLogicEngine`                          | нечёткий       | Mamdani/Sugeno + дефаззификация                 | `fuzzy_logic.rs:325,456`                         |
+| 8   | `FleFuzzyLogicEngine`                       | нечёткий       | полный Mamdani, 7 MF, 5 дефаззификаций          | `fuzzy_logic_engine/types.rs:380,496`            |
+| 9   | `EpistemicLogicReasoner`                    | модальный      | S5 Kripke model-checking, K/M/E/C               | `epistemic_logic.rs:210,332`                     |
+| 10  | `ProbabilisticLogicNetwork`                 | вероятностный  | PLN, truth values (strength, confidence)        | `probabilistic_logic_network.rs:483,577`         |
+| 11  | `BayesianNetworkInference`                  | вероятностный  | VE / Belief Propagation / Sampling              | `bayesian_network_inference.rs:575,665`          |
+| 12  | `BayesianUpdateEngine`                      | вероятностный  | сопряжённые приоры (Beta/Gauss/Dirichlet/Gamma) | `bayesian_updater.rs:335,357`                    |
+| 13  | `AbductiveReasoningEngine`                  | абдуктивный    | branch-and-bound по гипотезам                   | `abductive_reasoning_engine.rs:392,476`          |
+| 14  | `CausalInferenceEngine`                     | каузальный     | do-исчисление Пёрла + контрфактика              | `causal_inference.rs:244,573`                    |
+| 15  | `ConstraintSolver`                          | CSP            | AC-3 + backtracking + MRV/LCV                   | `constraint_solver.rs:322,764`                   |
+| 16  | `BeliefRevisionEngine`                      | ревизия        | AGM expansion/contraction/Levi-revision         | `belief_revision_engine.rs:336,487`              |
+| 17  | `ConstraintPropagationEngine`               | CSP            | AC3/AC4/AC6 + bounds propagation                | `constraint_propagation_engine/types_3.rs:16,93` |
+| 18  | `MarkovDecisionProcess`                     | планирование   | value/policy iteration (Беллман)                | `markov_decision_process/types.rs:150,259`       |
+| 19  | `ReinforcementLearningAgent`                | RL             | SARSA/Q/Expected-SARSA/Double-Q/N-step          | `reinforcement_learning_agent.rs:53,201`         |
+| 20  | `ReinforcementLearner`                      | RL             | Q/SARSA/Double-Q (упрощённый)                   | `reinforcement_learner.rs:217,386`               |
+| 21  | `HypothesisTestEngine`                      | статистика     | z/t-тесты, χ², тесты долей                      | `hypothesis_test_engine/types.rs:73,107`         |
+| 22  | `ProbabilisticProgramEngine`                | вероятностный  | MCMC: MH/Gibbs/Importance/Rejection             | `probabilistic_program_engine/ppe_types.rs:131`  |
+| 23  | `NeuralSymbolicIntegrator`                  | гибридный      | смесь нейро + символика                         | `neural_symbolic.rs:227,474`                     |
+| 24  | `DecisionTreeLearner`                       | индуктивный    | ID3/C4.5 (Entropy/Gini), прунинг                | `decision_tree_learner.rs:334,396`               |
+| 25  | `EnsembleLearner`                           | индуктивный    | Bagging/AdaBoost/GradBoost/RF/Stacking          | `ensemble_learner/types.rs:217,266`              |
 
 ---
 
