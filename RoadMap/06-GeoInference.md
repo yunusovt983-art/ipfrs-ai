@@ -29,10 +29,11 @@ updated: 2026-06-19
 | **Фаза 4.2** — планировщик маршрутизации/хеджирования + `Node::geo_fetch_block` | `ipfrs-network/src/geo.rs`, `ipfrs/src/node/geo_ops.rs` | `51471a1`, `26ffbe5` |
 | **Проброс в GraphQL** — `geo_fetch(cid, hedge_k)` + `NetworkNode::geo_fetch_block` | `ipfrs-interface/src/graphql.rs`, `ipfrs-network/src/node.rs` | `7bbcae8` |
 | **Фаза 3 (RTT)** — реальный per-peer RTT из ping → ранжирование кандидатов | `ipfrs-network/src/node.rs` (`peer_rtt`) | `9ec56b4` |
+| **Фаза 3 (регион)** — coarse-регион из Multiaddr на connect → region-affinity | `ipfrs-network/src/node.rs` (`peer_region`, `region_from_multiaddr`) | _текущий_ |
 
-Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4; `cargo check --workspace` зелёный.
-Осталось по фазам: 1.2 gossipsub-wire, 1.3 semantic-DHT transport, 3 (регион/нагрузка —
-RTT уже есть), 5 (исполнение), 6 (proof/FedAvg/residency); проброс в **gRPC** (GraphQL — готово).
+Тесты: geo 6/6, blockfetch 3/3, model_manifest 4/4, region 4/4; `cargo check --workspace` зелёный.
+Осталось по фазам: 1.2 gossipsub-wire, 1.3 semantic-DHT transport, 3 (нагрузка/load —
+RTT+регион уже есть), 5 (исполнение), 6 (proof/FedAvg/residency); проброс в **gRPC** (GraphQL — готово).
 
 ---
 

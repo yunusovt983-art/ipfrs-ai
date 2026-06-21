@@ -5,7 +5,9 @@ use futures::StreamExt;
 use libp2p::{
     autonat,
     core::Transport as _,
-    dcutr, identify, identity, kad, mdns, noise, ping, relay,
+    dcutr, identify, identity, kad, mdns,
+    multiaddr::Protocol,
+    noise, ping, relay,
     request_response::{self, OutboundRequestId, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, StreamProtocol, Swarm,
@@ -48,6 +50,38 @@ pub type BlockProvider = Arc<
 /// In-flight outbound block fetches: request id → (wanted CID, reply channel).
 type PendingFetch =
     Arc<Mutex<HashMap<OutboundRequestId, (cid::Cid, oneshot::Sender<IpfrsResult<ipfrs_core::Block>>)>>>;
+
+/// Derive a coarse region tag from a peer's multiaddr (RoadMap Phase 3).
+///
+/// Returns `"local"` (loopback), `"lan"` (private), or a public zone
+/// `"wan:a.b"` (IPv4 /16) / `"wan6:g"` (first IPv6 group). Empty if no IP
+/// component. This is a dependency-free heuristic; an operator can later install
+/// a real geoip resolver to refine it.
+fn region_from_multiaddr(addr: &Multiaddr) -> String {
+    for proto in addr.iter() {
+        match proto {
+            Protocol::Ip4(ip) => {
+                return if ip.is_loopback() {
+                    "local".to_string()
+                } else if ip.is_private() {
+                    "lan".to_string()
+                } else {
+                    let o = ip.octets();
+                    format!("wan:{}.{}", o[0], o[1])
+                };
+            }
+            Protocol::Ip6(ip) => {
+                return if ip.is_loopback() {
+                    "local".to_string()
+                } else {
+                    format!("wan6:{:x}", ip.segments()[0])
+                };
+            }
+            _ => {}
+        }
+    }
+    String::new()
+}
 
 /// Kademlia DHT configuration
 #[derive(Debug, Clone)]
@@ -470,6 +504,9 @@ pub struct NetworkNode {
     /// Measured per-peer round-trip latency in ms, updated from ping events
     /// (RoadMap Phase 3). Feeds geo routing candidate ranking.
     peer_rtt: Arc<DashMap<PeerId, f64>>,
+    /// Coarse per-peer region tag derived from the remote address on connect
+    /// (RoadMap Phase 3): "local" / "lan" / "wan:a.b". Feeds region affinity.
+    peer_region: Arc<DashMap<PeerId, String>>,
     /// NAT traversal (DCUtR hole-punch) metrics
     nat_metrics: Arc<parking_lot::RwLock<NatTraversalMetrics>>,
     /// In-process GossipSub manager for topic-based pub/sub messaging.
@@ -588,6 +625,7 @@ impl NetworkNode {
             provider_waiters: Arc::new(Mutex::new(HashMap::new())),
             block_provider: Arc::new(RwLock::new(None)),
             peer_rtt: Arc::new(DashMap::new()),
+            peer_region: Arc::new(DashMap::new()),
             nat_metrics: Arc::new(RwLock::new(NatTraversalMetrics::default())),
             gossipsub,
             inference_waiters: Arc::new(Mutex::new(HashMap::new())),
@@ -858,6 +896,7 @@ impl NetworkNode {
         let nat_metrics = Arc::clone(&self.nat_metrics);
         let block_provider = Arc::clone(&self.block_provider);
         let peer_rtt = Arc::clone(&self.peer_rtt);
+        let peer_region = Arc::clone(&self.peer_region);
         // In-flight outbound block fetches (RoadMap Phase 1.1), owned by the loop.
         let pending_fetch: PendingFetch = Arc::new(Mutex::new(HashMap::new()));
 
@@ -877,7 +916,7 @@ impl NetworkNode {
             loop {
                 tokio::select! {
                     event = swarm.select_next_some() => {
-                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch, &peer_rtt).await;
+                        Self::handle_swarm_event(event, &event_tx, swarm.behaviour_mut(), &external_addrs, &connected_peers, &provider_waiters, &nat_metrics, &block_provider, &pending_fetch, &peer_rtt, &peer_region).await;
                     }
                     Some(cmd) = swarm_cmd_rx.recv() => {
                         Self::handle_swarm_command(cmd, &mut swarm, &provider_waiters, &pending_fetch).await;
@@ -906,6 +945,7 @@ impl NetworkNode {
         block_provider: &Arc<RwLock<Option<BlockProvider>>>,
         pending_fetch: &PendingFetch,
         peer_rtt: &Arc<DashMap<PeerId, f64>>,
+        peer_region: &Arc<DashMap<PeerId, String>>,
     ) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
@@ -978,6 +1018,9 @@ impl NetworkNode {
 
                 // Track connected peer
                 connected_peers.insert(peer_id);
+
+                // Record a coarse region tag from the remote address (Phase 3).
+                peer_region.insert(peer_id, region_from_multiaddr(endpoint.get_remote_address()));
 
                 let conn_endpoint = if endpoint.is_dialer() {
                     ConnectionEndpoint::Dialer {
@@ -1461,6 +1504,23 @@ impl NetworkNode {
         self.peer_rtt.get(peer).map(|v| *v)
     }
 
+    /// Coarse region tag recorded for `peer` on connect (RoadMap Phase 3).
+    pub fn peer_region_of(&self, peer: &PeerId) -> Option<String> {
+        self.peer_region.get(peer).map(|v| v.clone())
+    }
+
+    /// Our own coarse region, derived from the first public external address.
+    fn local_region(&self) -> Option<String> {
+        let addrs = self.external_addrs.read();
+        for a in addrs.iter() {
+            let r = region_from_multiaddr(a);
+            if !r.is_empty() && r != "local" {
+                return Some(r);
+            }
+        }
+        None
+    }
+
     /// Fetch a block by CID from a connected peer over `/ipfrs/blockfetch/1.0.0`.
     ///
     /// Sends a request to the background swarm loop and awaits the verified block
@@ -1530,9 +1590,10 @@ impl NetworkNode {
                 // have not yet pinged get a neutral-high default so measured-low
                 // peers rank first.
                 let rtt_ms = self.peer_rtt.get(p).map(|v| *v).unwrap_or(1000.0);
+                let region = self.peer_region.get(p).map(|v| v.clone()).unwrap_or_default();
                 crate::geo::PeerCandidate {
                     peer_id: id,
-                    region: String::new(),
+                    region,
                     rtt_ms,
                     load: 0.0,
                     has_model: true,
@@ -1540,7 +1601,13 @@ impl NetworkNode {
             })
             .collect();
 
-        let decision = crate::geo::plan_routing(&candidates, policy).map_err(|e| {
+        // Default region affinity to our own region unless the caller set one.
+        let mut eff_policy = policy.clone();
+        if eff_policy.prefer_region.is_none() {
+            eff_policy.prefer_region = self.local_region();
+        }
+
+        let decision = crate::geo::plan_routing(&candidates, &eff_policy).map_err(|e| {
             ipfrs_core::error::Error::NotFound(format!("geo routing failed for {}: {:?}", cid, e))
         })?;
 
@@ -2046,5 +2113,38 @@ impl NetworkNode {
         self.active_relay_reservations
             .write()
             .retain(|_, instant| now.duration_since(*instant) < max_age);
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::region_from_multiaddr;
+    use libp2p::Multiaddr;
+
+    fn region(s: &str) -> String {
+        region_from_multiaddr(&s.parse::<Multiaddr>().unwrap())
+    }
+
+    #[test]
+    fn loopback_is_local() {
+        assert_eq!(region("/ip4/127.0.0.1/tcp/4001"), "local");
+        assert_eq!(region("/ip6/::1/tcp/4001"), "local");
+    }
+
+    #[test]
+    fn private_is_lan() {
+        assert_eq!(region("/ip4/192.168.1.5/tcp/4001"), "lan");
+        assert_eq!(region("/ip4/10.0.0.3/udp/4001/quic-v1"), "lan");
+    }
+
+    #[test]
+    fn public_ipv4_is_wan_zone() {
+        assert_eq!(region("/ip4/8.8.8.8/tcp/4001"), "wan:8.8");
+        assert_eq!(region("/ip4/203.0.113.7/tcp/4001"), "wan:203.0");
+    }
+
+    #[test]
+    fn no_ip_component_is_empty() {
+        assert_eq!(region("/dns4/example.com/tcp/4001"), "");
     }
 }
