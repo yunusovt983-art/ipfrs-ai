@@ -324,13 +324,13 @@ graph TD
     IF["🚪 ipfrs-interface\nШлюз · gRPC · GraphQL · 17K строк"]
 
     %% Приложение
-    NODE["🧠 ipfrs\nУзел / Оркестратор · 15K строк"]
+    NODE["🧠 ipfrs\nУзел / Оркестратор · 16K строк"]
 
     %% Доменный слой
     ST["💾 ipfrs-storage\nSled · WAL · GC · 135K строк"]
     NW["🌐 ipfrs-network\nlibp2p · Kademlia · 158K строк"]
     SM["🔍 ipfrs-semantic\nHNSW · DiskANN · 142K строк"]
-    TL["🤖 ipfrs-tensorlogic\n20+ движков · autograd · 158K строк"]
+    TL["🤖 ipfrs-tensorlogic\n20+ движков · autograd · 160K строк"]
     TR["📡 ipfrs-transport\nBitswap · QUIC · 34K строк"]
 
     %% Shared Kernel
@@ -414,25 +414,25 @@ graph TD
 
 | Крейт | Файлы | Строки |
 |-------|------:|------:|
-| `ipfrs-tensorlogic` | 218 | 157,560 |
-| `ipfrs-network` | 229 | 157,616 |
+| `ipfrs-tensorlogic` | 227 | 160,207 |
+| `ipfrs-network` | 230 | 157,910 |
 | `ipfrs-semantic` | 169 | 142,392 |
 | `ipfrs-storage` | 165 | 135,684 |
 | `ipfrs-transport` | 61 | 34,299 |
 | `ipfrs-core` | 51 | 23,949 |
 | `ipfrs-interface` | 29 | 17,621 |
-| `ipfrs` (узел) | 48 | 15,807 |
+| `ipfrs` (узел) | 50 | 16,074 |
 | `ipfrs-cli` | 36 | 12,821 |
 | `ipfrs-wasm` | 5 | 2,726 |
 | `ipfrs-nodejs` | 2 | 1,060 |
 | `ipfrs-python` | 1 | 590 |
-| **Итого** | **1,014** | **702,125** |
+| **Итого** | **1,026** | **705,333** |
 
-> **702,125 строк** Rust в **1,014 файлах** в 12 крейтах (без артефактов сборки).  
-> **732 файла** содержат `#[cfg(test)]` — обширное инлайн-покрытие тестами.  
+> **705,333 строк** Rust в **1,026 файлах** в 12 крейтах (без артефактов сборки).  
+> **741 файл** содержит `#[cfg(test)]` — обширное инлайн-покрытие тестами.  
 > **~193 внешних зависимости** в 15 файлах `Cargo.toml`.  
 > **Расположение**: `ipfrs_source/` (перенесено из `Vendor/ipfrs`).  
-> _Пересчитано 2026-06-21 — выверено по рабочему дереву (после Spike 1: RRF-фьюжн + per-peer circuit breaker в `ipfrs`/узле)._
+> _Пересчитано 2026-06-22 — выверено по рабочему дереву (после Spike 2/2b/2c — распределённое исполнение графа по libp2p — и Spike 3/3b — Conformist-движок `TlExecutor` + numeric-kernel'ы)._
 
 ---
 
