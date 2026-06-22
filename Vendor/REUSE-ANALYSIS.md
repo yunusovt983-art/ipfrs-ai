@@ -1,145 +1,186 @@
-# Vendor Reuse Analysis — DDD lens
+# Анализ переиспользования вендоров — через призму DDD
 
-> Companion to [`ARCHITECTURE.md`](ARCHITECTURE.md). That file maps the vendored contexts;
-> **this file decides what we take from them and *by which DDD integration pattern*.** Reuse is
-> never "copy a file" — it's a choice of relationship with an upstream Bounded Context.
+> Дополнение к [`ARCHITECTURE.md`](ARCHITECTURE.md). Тот файл картирует вендорённые контексты;
+> **этот файл решает, что мы из них берём и *каким именно DDD-паттерном интеграции*.** Переиспользование
+> — это никогда не «скопировать файл», а выбор отношения с вышестоящим Bounded Context.
 
-**Produced:** 2026-06-21, from a 5-way parallel source read (one explorer per context).
-**Host:** IPFRS (`ipfrs_source/`), Core differentiators = geo-distributed inference + proof-carrying
-responses; Generic substrate = tensor numerics, storage, network.
+**Подготовлено:** 2026-06-21, по результатам параллельного чтения 5 источников (по одному исследователю на контекст).
+**Хост:** IPFRS (`ipfrs_source/`), Core-дифференциаторы = гео-распределённый вывод + ответы с доказательствами
+(proof-carrying); Generic-субстрат = тензорная численность, хранилище, сеть.
 
-> ⚠️ **Verify before depending.** Findings come from excerpt-level reads, not a compile. Treat all
-> file paths / line numbers / type names below as *leads to confirm*, not facts. Heavy upstreams
-> (esp. trustformers → tch/candle/onnx) must be weighed against our lean P2P crate graph and the
-> known `network ↔ tensorlogic` dependency-cycle risk. Anything touching **SciRS2 is a Shared
-> Kernel** decision — not a unilateral bump.
-
----
-
-## 0. Decisions taken
-
-- **Tensor substrate (Phase 5):** keep our own lightweight `NumTensor`, **hidden behind a backend
-  trait** (Conformist on `TlExecutor`'s *interface*, not its impl). No heavy supplier dependency,
-  no SciRS2 inheritance, no cycle risk. A real engine can be swapped in behind the trait later.
-- **Op set:** grow it by **porting pure-`f32` kernels** (ACL), not by adopting a tensor crate.
+> ⚠️ **Проверяй, прежде чем зависеть.** Выводы получены из чтения фрагментов, а не из компиляции. Все
+> пути к файлам / номера строк / имена типов ниже считай *зацепками для подтверждения*, а не фактами.
+> Тяжёлые апстримы (особенно trustformers → tch/candle/onnx) нужно взвешивать против нашего лёгкого
+> графа P2P-крейтов и известного риска цикла зависимостей `network ↔ tensorlogic`. Всё, что затрагивает
+> **SciRS2, — это решение уровня Shared Kernel**, а не односторонний апгрейд.
 
 ---
 
-## 1. Integration patterns (the DDD legend)
+## 0. Принятые решения
 
-| Pattern | Meaning here | Cost / guardrail |
-|---------|--------------|------------------|
-| **Conformist** | adopt upstream's *model/interface*, speak its language | cheap; we don't control its evolution |
-| **ACL port** | copy the *algorithm*, translate types into our Ubiquitous Language | upstream types must not leak past the edge |
-| **Supplier dependency** | `depend on` the crate directly | inherits its dep graph; only for Generic subdomains |
-| **Shared Kernel** | jointly-governed dep (SciRS2) | change = multi-context decision |
-| **Published Language** | enrich our `model_manifest` (DAG-CBOR) with upstream conventions | keep it ours, versioned by CID |
-
-**Strategic rule:** *we own Core, we buy Generic.* Port Core mechanics carefully through an ACL;
-depend on suppliers only for replaceable substrate.
+- **Тензорный субстрат (Phase 5):** оставляем собственный лёгкий `NumTensor`, **спрятанный за бэкенд-трейтом**
+  (Conformist на *интерфейс* `TlExecutor`, а не на его реализацию). Никакой тяжёлой supplier-зависимости,
+  никакого наследования SciRS2, никакого риска цикла. Реальный движок можно подставить за трейт позже.
+- **Набор операций:** наращиваем его **портом чистых `f32`-kernel'ов** (ACL), а не принятием тензорного крейта.
 
 ---
 
-## 2. Reuse map — by host subdomain
+## 1. Паттерны интеграции (легенда DDD)
 
-### 🔴 Core — distributed graph execution (Phase 5)  ·  *highest leverage*
-ACL ports, low dependency weight; these are the actual unblock.
+| Паттерн | Что означает здесь | Стоимость / ограничитель |
+|---------|--------------------|--------------------------|
+| **Conformist** | принять *модель/интерфейс* апстрима, говорить на его языке | дёшево; мы не управляем его эволюцией |
+| **ACL-порт** | скопировать *алгоритм*, перевести типы в наш Ubiquitous Language | типы апстрима не должны протекать за границу |
+| **Supplier-зависимость** | `depend on` крейт напрямую | наследуется его граф зависимостей; только для Generic-поддоменов |
+| **Shared Kernel** | совместно управляемая зависимость (SciRS2) | изменение = решение нескольких контекстов |
+| **Published Language** | обогатить наш `model_manifest` (DAG-CBOR) соглашениями апстрима | оставляем своим, версионируем по CID |
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| `PartitioningStrategy` + `PartitionedGraph` with **per-stage comm schedule** | torsh | `torsh-fx/src/graph_partitioning.rs` | ACL port | HIGH / Low-Med |
-| `ShardInfo` (peer owns which slice) → add to `NumTensor` | torsh | `torsh-distributed/src/tensor_parallel.rs` | ACL port | HIGH / Low |
-| `CollectiveOp{AllReduce,AllGather,ReduceScatter,Barrier}` over libp2p | torsh | `torsh-distributed/src/collectives.rs` | ACL port | HIGH / Med |
-| einsum contraction analysis + `placement`/`scheduling`/`partitioned` | tensorlogic | `tensorlogic-infer/src/{join_order,placement,scheduling,partitioned}` | ACL port | HIGH / Med |
-| pipeline/tensor-parallel as reference ("layers across peers") | trustformers | `trustformers-core/src/parallel/{tensor,pipeline}_parallel.rs` | study only | Med-High / High |
+**Стратегическое правило:** *Core — владеем, Generic — покупаем.* Механику Core портируем аккуратно через ACL;
+от suppliers зависим только ради заменяемого субстрата.
 
-### 🟠 Generic — numeric engine  ·  *decision locked: own-it-behind-trait*
+---
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| `TlExecutor` trait + `ElemOp`/`ReduceOp` enums → wrap `NumTensor` | tensorlogic | `tensorlogic-infer/src/{traits.rs,ops.rs}` | **Conformist (interface)** | HIGH / Low |
-| pure-`f32` kernels: `softmax`(log-sum-exp), `layer_norm`, `rms_norm`, `gelu`, `silu`, subnormal-detect | oxigaf | `oxigaf-diffusion/src/numerics.rs` | ACL port | HIGH / Low |
-| `EinsumGraph`/`OpType` + graph `validation` as IR reference | tensorlogic | `tensorlogic-ir/src/graph/{node,optype,validation}.rs` | Conformist (optional) | Med / Low-Med |
-| _full `Tensor<T>` / autograd / mmap_ | torsh-core / trustformers-core | — | **Supplier — deferred** (SciRS2 + heavy deps) | — |
+## 2. Карта переиспользования — по поддоменам хоста
 
-### 🟠 Core-ish — federated / distributed training
+### 🔴 Core — распределённое исполнение графа (Phase 5)  ·  *наивысший рычаг*
+ACL-порты, малый вес зависимостей; именно это и есть разблокировка.
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| `Optimizer`/`Loss` traits → FedAvg implements `Optimizer` | tensorlogic | `tensorlogic-train/src/{optimizers,loss}` | Conformist | Med / Low |
-| Byzantine-robust `AggregationStrategy{Krum,Median}` + client selection | torsh | `torsh-autograd/src/federated_learning/` | ACL port | Med / Med |
-| gradient accumulation + mixed-precision loss scaling + flow tracking | oxigaf | `oxigaf-trainer/src/{gradient_accumulation,mixed_precision,gradient_flow}.rs` | ACL port | HIGH / Low-Med |
+> ✅ **Spike 2 ГОТОВ 2026-06-22 — vocabulary партиционирования, sharding и collectives ACL-портированы в новый
+> модуль `ipfrs-tensorlogic::distributed` (local/pure/synchronous, без dep на `ipfrs-network` → нет цикла).**
+> *Vocabulary* заимствован у torsh; *алгоритмы — наши собственные и реально считают* —
+> тела collectives у torsh оказались mock-заглушками («skip the averaging to avoid type issues»),
+> поэтому брать стоило только формы типов. Три сабмодуля (23 unit-теста, все зелёные):
+> • `sharding` — `ShardStrategy{Row,Column}Parallel` + `ShardSpec`, `plan_shards`/`shard_tensor`/
+>   `gather_shards` (2-D `NumTensor`, ровное разбиение с остатком-вперёд, проверено roundtrip'ом).
+> • `collectives` — `ReduceOp{Sum,Mean,Max,Min,Product}` + реальные `all_reduce`/`all_gather`/
+>   `reduce_scatter` над `NumTensor`.
+> • `schedule` — `build_communication_schedule(partitions, edges)` → `CommunicationSchedule`
+>   (`CommunicationStage` / `DataTransfer`); строит DAG уровня партиций из рёбер-разрезов и
+>   раскладывает трансферы по слоям longest-path по готовности исходной партиции (= «partition graph +
+>   stream activations»). Это и есть постадийное расписание связи, которого не хватало партиционеру.
+> ✅ **Spike 2b ГОТОВ 2026-06-22 — libp2p wire-протокол `/ipfrs/activation/1.0.0` + проводка через
+> инверсию зависимостей; DoD достигнут.** Три слоя, цикл `network ↔ tensorlogic` остался невозможен:
+> • `ipfrs-tensorlogic::distributed::wire` — serde `StageRequest`/`StageResponse` + чистый
+>   `execute_stage` (то, что считает пир); `transport` — трейт `ActivationTransport` + оркестратор
+>   `execute_pipeline` + in-process `LocalTransport` (single-node fallback). Чистые, тестируются без
+>   сети. Попутно починен serde-roundtrip `ComputationGraph` (поле `cid` без `#[serde(default)]`).
+> • `ipfrs-network` — протокол `/ipfrs/activation/1.0.0` (паттерн `semsearch`: behaviour, event loop,
+>   SwarmCommand, provider-callback). Транспорт реализован на Send+Sync `ActivationHandle` (клон
+>   `cmd_tx` + `connected_peers`), т.к. `NetworkNode` держит libp2p `Swarm` и `!Sync`; стадия,
+>   закреплённая за локальным пиром, считается in-process без сетевого round-trip.
+> • `ipfrs::Node` — `enable_distributed_execution` (сервер: provider → `execute_stage`) +
+>   `run_distributed_pipeline` (клиент: `execute_pipeline` поверх `ActivationHandle`).
+> **DoD выполнен:** интеграционный тест `distributed_exec_integration.rs` — 2-stage граф исполняется
+> на 2 живых libp2p-нодах (stage 1 на узле B по сети, stage 2 на узле A локально; активация `h`
+> стримится B→A). 32 + 2 юнит-теста + интеграционный — зелёные, clippy чист.
+> **Остаётся (Spike 2c, опц.):** связать `graph_partitioner`/`build_communication_schedule` →
+> авто-построение `PipelineStage` из партиций (сейчас стадии задаёт вызывающий вручную); тюнинг
+> размера CBOR-сообщений под крупные активации.
 
-### 🟢 Supporting — semantic search / retrieval (we already have HNSW)  ·  *quick wins*
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| ~~`PartitioningStrategy` + `PartitionedGraph` с **постадийным comm-расписанием**~~ | torsh | `torsh-fx/src/graph_partitioning.rs` | ✅ **ГОТОВО** — `distributed::schedule::build_communication_schedule` над нашими `Partition`/`GraphEdge` | ГОТОВО 2026-06-22 |
+| ~~`ShardInfo` (пир владеет каким срезом) → добавить в `NumTensor`~~ | torsh | `torsh-distributed/src/tensor_parallel.rs` | ✅ **ГОТОВО** — `distributed::sharding` (`ShardSpec`/`ShardStrategy`) | ГОТОВО 2026-06-22 |
+| ~~`CollectiveOp{AllReduce,AllGather,ReduceScatter,Barrier}` поверх libp2p~~ | torsh | `torsh-distributed/src/collectives.rs` | ✅ **ГОТОВО (локально)** — `distributed::collectives` реальные редукции; слой libp2p = Spike 2b | ГОТОВО 2026-06-22 (wire отложен) |
+| анализ свёртки einsum + `placement`/`scheduling`/`partitioned` | tensorlogic | `tensorlogic-infer/src/{join_order,placement,scheduling,partitioned}` | ACL-порт | ВЫС / Сред |
+| pipeline/tensor-parallel как референс («слои по пирам») | trustformers | `trustformers-core/src/parallel/{tensor,pipeline}_parallel.rs` | только изучить | Сред-Выс / Выс |
 
-> ✅ **Verified 2026-06-21 — SIMD and RRF already exist in the host; do NOT port from oxirag.**
-> `ipfrs-semantic::simd` already has `cosine_distance`/`l2_distance`/`dot_product` with runtime
-> AVX2/AVX/SSE/NEON detection + scalar fallback. `ipfrs-semantic::result_aggregator` already has
-> `ResultAggregator` + `AggregationStrategy::RankFusion` + `aggregate_rrf()` (RRF, k=60 default).
-> The real gap was that `semantic_search_distributed` did a naive best-score CID merge instead of
-> using them — **now fixed by wiring the existing `ResultAggregator` (RRF) into the distributed
-> fan-out** (`ipfrs/src/node/semantic_ops.rs`), each peer + local index as its own ranked source.
+### 🟠 Generic — численный движок  ·  *решение зафиксировано: владеем-за-трейтом*
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| ~~`SimilarityEngine` (auto AVX2/NEON cosine)~~ | oxirag | `simd_similarity.rs` | ❌ **redundant** — host already has `ipfrs-semantic::simd` | DONE (pre-existing) |
-| ~~**RRF fusion** for merging peer results~~ | oxirag | `hybrid_search.rs` | ✅ **DONE** — wired existing `ipfrs-semantic::result_aggregator` into `semantic_search_distributed` | DONE 2026-06-21 |
-| reranker pipeline + query expansion + relevance feedback | oxirag | `reranker.rs`, `query_expansion.rs`, `relevance_feedback.rs` | ACL port | Med / Low-Med |
-| KG overlay over CID blocks | oxirag | `layer4_graph/` | ACL port | Med / Med |
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| трейт `TlExecutor` + enum'ы `ElemOp`/`ReduceOp` → обернуть `NumTensor` | tensorlogic | `tensorlogic-infer/src/{traits.rs,ops.rs}` | **Conformist (интерфейс)** | ВЫС / Низк |
+| чистые `f32`-kernel'ы: `softmax`(log-sum-exp), `layer_norm`, `rms_norm`, `gelu`, `silu`, детект субнормалей | oxigaf | `oxigaf-diffusion/src/numerics.rs` | ACL-порт | ВЫС / Низк |
+| `EinsumGraph`/`OpType` + `validation` графа как референс IR | tensorlogic | `tensorlogic-ir/src/graph/{node,optype,validation}.rs` | Conformist (опц.) | Сред / Низк-Сред |
+| _полный `Tensor<T>` / autograd / mmap_ | torsh-core / trustformers-core | — | **Supplier — отложено** (SciRS2 + тяжёлые deps) | — |
 
-### 🔴 Core — proof-carrying inference (we already emit `proof_json`)
+### 🟠 Core-ish — федеративное / распределённое обучение
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| `ClaimExtractor` (NL → predicates) + `SmtVerifier` (SMT-LIB2, peer-checkable) | oxirag | `layer3_judge/` | ACL port + supplier (SMT) | HIGH / High |
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| трейты `Optimizer`/`Loss` → FedAvg реализует `Optimizer` | tensorlogic | `tensorlogic-train/src/{optimizers,loss}` | Conformist | Сред / Низк |
+| византийско-устойчивые `AggregationStrategy{Krum,Median}` + отбор клиентов | torsh | `torsh-autograd/src/federated_learning/` | ACL-порт | Сред / Сред |
+| аккумуляция градиентов + loss-scaling смешанной точности + трекинг потока | oxigaf | `oxigaf-trainer/src/{gradient_accumulation,mixed_precision,gradient_flow}.rs` | ACL-порт | ВЫС / Низк-Сред |
 
-### ⚪ Cross-cutting — resilience of distributed peer queries
+### 🟢 Supporting — семантический поиск / retrieval (HNSW у нас уже есть)  ·  *быстрые победы*
 
-> ✅ **Verified 2026-06-21 — circuit breaker already exists in the host; do NOT port from oxirag.**
-> `ipfrs-network::circuit_breaker` already has `CircuitBreakerRegistry` + `PeerCircuitBreaker`
-> (Closed/Open/HalfOpen, sliding window, slow-call detection). It just wasn't wired into the
-> semantic fan-out. **Now fixed:** `Node` holds a `Mutex<CircuitBreakerRegistry>` and
-> `semantic_search_distributed` guards each peer query (`can_call` → skip Open peers;
+> ✅ **Проверено 2026-06-21 — SIMD и RRF уже есть в хосте; НЕ портировать из oxirag.**
+> В `ipfrs-semantic::simd` уже есть `cosine_distance`/`l2_distance`/`dot_product` с рантайм-детектом
+> AVX2/AVX/SSE/NEON + скалярный фолбэк. В `ipfrs-semantic::result_aggregator` уже есть
+> `ResultAggregator` + `AggregationStrategy::RankFusion` + `aggregate_rrf()` (RRF, k=60 по умолчанию).
+> Реальный пробел был в том, что `semantic_search_distributed` делал наивный merge по лучшему score
+> на CID вместо их использования — **теперь исправлено проводкой существующего `ResultAggregator` (RRF)
+> в распределённый fan-out** (`ipfrs/src/node/semantic_ops.rs`), где каждый пир + локальный индекс —
+> отдельный ранжированный источник.
+
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| ~~`SimilarityEngine` (авто AVX2/NEON cosine)~~ | oxirag | `simd_similarity.rs` | ❌ **избыточно** — в хосте уже есть `ipfrs-semantic::simd` | ГОТОВО (уже было) |
+| ~~**RRF-слияние** для merge результатов пиров~~ | oxirag | `hybrid_search.rs` | ✅ **ГОТОВО** — существующий `ipfrs-semantic::result_aggregator` подключён в `semantic_search_distributed` | ГОТОВО 2026-06-21 |
+| reranker-конвейер + расширение запроса + relevance feedback | oxirag | `reranker.rs`, `query_expansion.rs`, `relevance_feedback.rs` | ACL-порт | Сред / Низк-Сред |
+| KG-оверлей поверх CID-блоков | oxirag | `layer4_graph/` | ACL-порт | Сред / Сред |
+
+### 🔴 Core — вывод с доказательствами (мы уже отдаём `proof_json`)
+
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| `ClaimExtractor` (NL → предикаты) + `SmtVerifier` (SMT-LIB2, проверяемо пиром) | oxirag | `layer3_judge/` | ACL-порт + supplier (SMT) | ВЫС / Выс |
+
+### ⚪ Сквозное — устойчивость распределённых запросов к пирам
+
+> ✅ **Проверено 2026-06-21 — circuit breaker уже есть в хосте; НЕ портировать из oxirag.**
+> В `ipfrs-network::circuit_breaker` уже есть `CircuitBreakerRegistry` + `PeerCircuitBreaker`
+> (Closed/Open/HalfOpen, скользящее окно, детект медленных вызовов). Он просто не был подключён к
+> семантическому fan-out. **Теперь исправлено:** `Node` держит `Mutex<CircuitBreakerRegistry>`, а
+> `semantic_search_distributed` защищает каждый запрос к пиру (`can_call` → пропускать Open-пиров;
 > `record_result` Success/Failure/Timeout).
 
-| Take | From | File (verify) | Pattern | Rel / Effort |
-|------|------|---------------|---------|--------------|
-| ~~circuit breaker (Closed/Open/HalfOpen per peer)~~ | oxirag | `circuit_breaker.rs` | ✅ **DONE** — wired existing `ipfrs-network::circuit_breaker` into peer fan-out | DONE 2026-06-21 |
-| retry+backoff+jitter + libp2p conn pool | oxirag | `retry.rs`, `connection_pool.rs` | ACL port (host has `ipfrs-storage::retry` — check reuse first) | Med / Low |
+| Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
+|-------|--------|------------------|---------|----------------------|
+| ~~circuit breaker (Closed/Open/HalfOpen на пира)~~ | oxirag | `circuit_breaker.rs` | ✅ **ГОТОВО** — существующий `ipfrs-network::circuit_breaker` подключён в fan-out по пирам | ГОТОВО 2026-06-21 |
+| retry+backoff+jitter + пул соединений libp2p | oxirag | `retry.rs`, `connection_pool.rs` | ACL-порт (в хосте есть `ipfrs-storage::retry` — сперва проверить переиспользование) | Сред / Низк |
 
-### ⚫ oxigaf domain — **not reusable**
-~80% is FLAME / Gaussian-splat rendering / diffusion-domain logic. Take only the infra kernels and
-training patches listed above; ignore `oxigaf-{render,flame}` and the avatar trainer orchestration.
-
----
-
-## 3. Serving (Supporting, when we run real transformer inference)
-
-From **trustformers** (only if/when we move past `serve_inference` stub) — adopt patterns, avoid the
-heavy crate: dynamic batching (`trustformers-serve/src/batching/`), KVCache + eviction +
-prefix-cache (`trustformers-serve/src/{kv_cache,prefix_cache}/`), load balancer + health checks.
-**Published Language angle:** bridge `model_manifest` CID-addressed layers → a `Model`-style loader
-so weights load *from content-addressed blocks* instead of HF Hub.
+### ⚫ Домен oxigaf — **не переиспользуем**
+~80% — это логика FLAME / рендеринга Gaussian-splat / диффузионного домена. Берём только инфра-kernel'ы и
+патчи обучения, перечисленные выше; игнорируем `oxigaf-{render,flame}` и оркестрацию тренера аватаров.
 
 ---
 
-## 4. Recommended sequence (by leverage)
+## 3. Serving (Supporting, когда запустим реальный инференс трансформеров)
 
-1. ✅ **Spike 1 — retrieval quick wins** — **DONE 2026-06-21.** Outcome differed from the plan:
-   SIMD, RRF and the per-peer circuit breaker *already existed* in the host (`ipfrs-semantic::simd`,
-   `ipfrs-semantic::result_aggregator`, `ipfrs-network::circuit_breaker`) — nothing was ported from
-   oxirag. The win was **wiring**: `semantic_search_distributed` now RRF-fuses local + per-peer
-   ranked lists via `ResultAggregator` and guards each peer with a persistent
-   `CircuitBreakerRegistry` (skip Open peers, record Success/Failure/Timeout). Lesson: the
-   "verify before depending" guardrail paid off — the analysis's excerpt-based "port from oxirag"
-   leads were redundant with mature host code. Remaining optional retrieval items: reranker /
-   query-expansion / KG overlay (genuinely absent → still candidate ACL ports).
-2. **Spike 2 — unblock Phase 5**: ACL-port torsh partitioning + `ShardInfo` + collectives →
-   `graph_partitioner` gains a communication schedule (= partition graph + stream activations).
-3. **Spike 3 — Conformist engine**: wrap `NumTensor` in `TlExecutor`; add missing ops from
+Из **trustformers** (только если/когда выйдем за пределы заглушки `serve_inference`) — перенять паттерны,
+избегая тяжёлого крейта: динамический батчинг (`trustformers-serve/src/batching/`), KVCache + вытеснение +
+prefix-cache (`trustformers-serve/src/{kv_cache,prefix_cache}/`), балансировщик нагрузки + health-check'и.
+**Угол Published Language:** мост от CID-адресуемых слоёв `model_manifest` → загрузчик в стиле `Model`,
+чтобы веса грузились *из контент-адресуемых блоков* вместо HF Hub.
+
+---
+
+## 4. Рекомендуемая последовательность (по рычагу)
+
+1. ✅ **Spike 1 — быстрые победы в retrieval** — **ГОТОВО 2026-06-21.** Результат отличался от плана:
+   SIMD, RRF и circuit breaker на пира *уже существовали* в хосте (`ipfrs-semantic::simd`,
+   `ipfrs-semantic::result_aggregator`, `ipfrs-network::circuit_breaker`) — из oxirag не портировали
+   ничего. Победа была в **проводке**: `semantic_search_distributed` теперь RRF-сливает локальный +
+   per-peer ранжированные списки через `ResultAggregator` и защищает каждого пира персистентным
+   `CircuitBreakerRegistry` (пропуск Open-пиров, запись Success/Failure/Timeout). Урок:
+   ограничитель «проверяй, прежде чем зависеть» окупился — зацепки анализа «port from oxirag», основанные
+   на фрагментах, оказались избыточны при зрелом коде хоста. Оставшиеся опциональные retrieval-пункты:
+   reranker / расширение запроса / KG-оверлей (реально отсутствуют → по-прежнему кандидаты на ACL-порт).
+2. ✅ **Spike 2 — разблокировка Phase 5** — **ГОТОВО 2026-06-22.** ACL-порт партиционирования torsh + `ShardInfo` +
+   collectives в новый модуль `ipfrs-tensorlogic::distributed`: у `graph_partitioner` теперь есть
+   спутник `build_communication_schedule` (= partition graph + stream activations), плюс примитивы
+   `sharding` + `collectives` (23 теста, все зелёные; без dep на `ipfrs-network`). Тот же урок, что в
+   Spike 1: collectives у torsh были mock-заглушками, поэтому портирован только *vocabulary* — алгоритмы
+   наши собственные.
+   ✅ **Spike 2b — ГОТОВО 2026-06-22.** libp2p-протокол `/ipfrs/activation/1.0.0` + проводка через
+   инверсию зависимостей (`wire`/`transport` в tensorlogic, протокол в network, оркестрация в `Node`).
+   DoD достигнут: 2-stage граф на 2 живых нодах (интеграционный тест `distributed_exec_integration.rs`).
+   Деталь — `NetworkNode` `!Sync` (держит `Swarm`), поэтому транспорт реализован на Send+Sync
+   `ActivationHandle`, а не на `&NetworkNode`. **Spike 2c (опц.):** авто-`PipelineStage` из партиций.
+3. **Spike 3 — Conformist-движок**: обернуть `NumTensor` в `TlExecutor`; добавить недостающие операции из
    `oxigaf/numerics.rs` (softmax / layernorm / gelu / silu).
-4. **Mid-term**: SMT judge → proof-carrying; Krum aggregation → FedAvg; gradient flow tracking.
+4. **Среднесрочное**: SMT-судья → proof-carrying; агрегация Krum → FedAvg; трекинг потока градиентов.
 
-**Guardrail (from `ARCHITECTURE.md` §4):** keep upstream types behind our ACL
-(`ipfrs_source/crates/ipfrs-tensorlogic` and the network edge) — they must not leak into Core
-domain types.
+**Ограничитель (из `ARCHITECTURE.md` §4):** держать типы апстрима за нашим ACL
+(`ipfrs_source/crates/ipfrs-tensorlogic` и граница сети) — они не должны протекать в доменные типы Core.

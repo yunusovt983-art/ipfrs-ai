@@ -295,6 +295,7 @@ pub mod consensus;
 pub mod constraint_solver;
 pub mod datalog;
 pub mod device;
+pub mod distributed;
 pub mod distributed_backward_chainer;
 pub mod feed_forward;
 pub mod ffi_profiler;

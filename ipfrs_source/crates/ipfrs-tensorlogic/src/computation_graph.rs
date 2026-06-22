@@ -523,6 +523,7 @@ pub struct ComputationGraph {
     pub metadata: HashMap<String, String>,
 
     /// Graph CID (if stored in IPFS)
+    #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(serialize_with = "serialize_optional_cid")]
     #[serde(deserialize_with = "deserialize_optional_cid")]
@@ -1651,21 +1652,27 @@ impl DistributedExecutor {
         self.assignments.get(node_id)
     }
 
-    /// Execute a distributed graph
-    /// NOTE: This is a stub that will be integrated with ipfrs-network
+    /// Execute a distributed graph.
+    ///
+    /// Real distributed execution is driven through the transport-agnostic pipeline
+    /// in [`crate::distributed::transport`]: build [`PipelineStage`]s from the
+    /// partitions and run them with [`execute_pipeline`] over an
+    /// [`ActivationTransport`] (libp2p in the node layer, [`LocalTransport`]
+    /// in-process). That seam keeps networking out of this crate — see the
+    /// `distributed` module. This method remains a synchronous stub for the legacy
+    /// `DistributedExecutor` partition model and is not the integration entry point.
+    ///
+    /// [`PipelineStage`]: crate::distributed::transport::PipelineStage
+    /// [`execute_pipeline`]: crate::distributed::transport::execute_pipeline
+    /// [`ActivationTransport`]: crate::distributed::transport::ActivationTransport
+    /// [`LocalTransport`]: crate::distributed::transport::LocalTransport
     pub fn execute_distributed(
         &self,
         _graph: &ComputationGraph,
     ) -> Result<HashMap<String, Vec<f32>>, GraphError> {
-        // This is a placeholder for distributed execution
-        // When ipfrs-network is integrated, this will:
-        // 1. Send subgraphs to respective workers
-        // 2. Coordinate data transfer between workers
-        // 3. Collect results from workers
-        // 4. Assemble final output
-
         Err(GraphError::ExecutionError(
-            "Distributed execution requires ipfrs-network integration".to_string(),
+            "use crate::distributed::transport::execute_pipeline for distributed execution"
+                .to_string(),
         ))
     }
 

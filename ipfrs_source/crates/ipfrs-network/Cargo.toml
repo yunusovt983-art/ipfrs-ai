@@ -26,6 +26,7 @@ quinn = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 futures = { workspace = true }
 futures-util = { workspace = true }
+async-trait = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }

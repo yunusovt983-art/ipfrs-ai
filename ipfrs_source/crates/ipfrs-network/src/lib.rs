@@ -191,6 +191,8 @@ pub use models::MODELS_TOPIC;
 
 pub mod semsearch;
 
+pub mod activation;
+
 pub mod block_transfer;
 pub use block_transfer::{
     BlockTransfer, StreamingBlockTransfer, TransferChunk, TransferDirection, TransferManagerStats,

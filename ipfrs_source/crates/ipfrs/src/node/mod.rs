@@ -18,6 +18,7 @@ mod auth_ops;
 mod block_ops;
 mod core;
 mod dag_ops;
+mod distributed_exec_ops;
 mod geo_ops;
 mod models_ops;
 mod network_ops;
