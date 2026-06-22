@@ -129,6 +129,7 @@ impl GraphVisualizer {
             | TensorOp::Tanh
             | TensorOp::Sigmoid
             | TensorOp::GELU
+            | TensorOp::SiLU
             | TensorOp::Softmax { .. } => "lightgreen",
             TensorOp::LayerNorm { .. } | TensorOp::BatchNorm { .. } => "lightcoral",
             TensorOp::Dropout { .. } => "plum",
@@ -154,6 +155,7 @@ impl GraphVisualizer {
             TensorOp::Tanh => "Tanh".to_string(),
             TensorOp::Sigmoid => "Sigmoid".to_string(),
             TensorOp::GELU => "GELU".to_string(),
+            TensorOp::SiLU => "SiLU".to_string(),
             TensorOp::Softmax { axis } => format!("Softmax(axis={})", axis),
             TensorOp::LayerNorm {
                 normalized_shape: _,
@@ -245,6 +247,7 @@ impl GraphVisualizer {
             TensorOp::Tanh => "Tanh",
             TensorOp::Sigmoid => "Sigmoid",
             TensorOp::GELU => "GELU",
+            TensorOp::SiLU => "SiLU",
             TensorOp::Softmax { .. } => "Softmax",
             TensorOp::LayerNorm { .. } => "LayerNorm",
             TensorOp::BatchNorm { .. } => "BatchNorm",

@@ -87,10 +87,20 @@ ACL-порты, малый вес зависимостей; именно это 
 
 ### 🟠 Generic — численный движок  ·  *решение зафиксировано: владеем-за-трейтом*
 
+> ✅ **Spike 3 ГОТОВ 2026-06-22 — Conformist-трейт `TlExecutor` + ACL-порт kernel'ов из oxigaf.**
+> • `ipfrs-tensorlogic::tl_executor` — трейт `TlExecutor` (assoc. `Tensor`/`Error`; `einsum`/`elem_op`/
+>   `elem_op_binary`/`reduce`) + enum'ы `ElemOp`/`ReduceOp` по форме `tensorlogic-infer` (Conformist
+>   на интерфейс) + бэкенд `NumExecutor` над `NumTensor` (наша реализация; einsum пока matmul
+>   `ab,bc->ac`, reduce — целиком/2-D по оси). • `ipfrs-tensorlogic::numerics` — ACL-порт чистых f32:
+>   `softmax`/`log_softmax`/`layer_norm`/`rms_norm`/`gelu`/`silu` (ошибки → `GraphError`, не отдельный
+>   `NumericsError`). • Граф-исполнитель `numeric_exec` теперь считает `Softmax{axis}`, `LayerNorm`,
+>   новый op `SiLU`, а `GELU` идёт через общий kernel. 10 + 7 + 5 тестов зелёные, clippy чист.
+> Решение «владеем-за-трейтом» в силе: тяжёлый бэкенд (SciRS2/GPU) можно подставить за `TlExecutor`.
+
 | Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
 |-------|--------|------------------|---------|----------------------|
-| трейт `TlExecutor` + enum'ы `ElemOp`/`ReduceOp` → обернуть `NumTensor` | tensorlogic | `tensorlogic-infer/src/{traits.rs,ops.rs}` | **Conformist (интерфейс)** | ВЫС / Низк |
-| чистые `f32`-kernel'ы: `softmax`(log-sum-exp), `layer_norm`, `rms_norm`, `gelu`, `silu`, детект субнормалей | oxigaf | `oxigaf-diffusion/src/numerics.rs` | ACL-порт | ВЫС / Низк |
+| ~~трейт `TlExecutor` + enum'ы `ElemOp`/`ReduceOp` → обернуть `NumTensor`~~ | tensorlogic | `tensorlogic-infer/src/{traits.rs,ops.rs}` | ✅ **ГОТОВО** — `tl_executor` (трейт + `NumExecutor`) | ГОТОВО 2026-06-22 |
+| ~~чистые `f32`-kernel'ы: `softmax`(log-sum-exp), `layer_norm`, `rms_norm`, `gelu`, `silu`~~ | oxigaf | `oxigaf-diffusion/src/numerics.rs` | ✅ **ГОТОВО** — `numerics` (ACL-порт) + проводка в граф | ГОТОВО 2026-06-22 |
 | `EinsumGraph`/`OpType` + `validation` графа как референс IR | tensorlogic | `tensorlogic-ir/src/graph/{node,optype,validation}.rs` | Conformist (опц.) | Сред / Низк-Сред |
 | _полный `Tensor<T>` / autograd / mmap_ | torsh-core / trustformers-core | — | **Supplier — отложено** (SciRS2 + тяжёлые deps) | — |
 
@@ -178,8 +188,11 @@ prefix-cache (`trustformers-serve/src/{kv_cache,prefix_cache}/`), баланси
    DoD достигнут: 2-stage граф на 2 живых нодах (интеграционный тест `distributed_exec_integration.rs`).
    Деталь — `NetworkNode` `!Sync` (держит `Swarm`), поэтому транспорт реализован на Send+Sync
    `ActivationHandle`, а не на `&NetworkNode`. **Spike 2c (опц.):** авто-`PipelineStage` из партиций.
-3. **Spike 3 — Conformist-движок**: обернуть `NumTensor` в `TlExecutor`; добавить недостающие операции из
-   `oxigaf/numerics.rs` (softmax / layernorm / gelu / silu).
+3. ✅ **Spike 3 — Conformist-движок** — **ГОТОВО 2026-06-22.** `NumTensor` за трейтом `TlExecutor`
+   (`tl_executor`: трейт + `ElemOp`/`ReduceOp` по форме `tensorlogic-infer` + бэкенд `NumExecutor`) +
+   ACL-порт чистых f32-kernel'ов из `oxigaf/numerics.rs` (`numerics`: softmax/log_softmax/layer_norm/
+   rms_norm/gelu/silu); граф-исполнитель считает `Softmax`/`LayerNorm`/новый `SiLU`. 22 теста зелёные.
+   **Spike 3b (опц.):** обобщить einsum/reduce в `NumExecutor`; переключить `numeric_exec` на `TlExecutor`.
 4. **Среднесрочное**: SMT-судья → proof-carrying; агрегация Krum → FedAvg; трекинг потока градиентов.
 
 **Ограничитель (из `ARCHITECTURE.md` §4):** держать типы апстрима за нашим ACL

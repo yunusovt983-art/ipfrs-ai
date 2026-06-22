@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 
 use crate::computation_graph::{ComputationGraph, GraphError, GraphNode, TensorOp};
+use crate::numerics;
 
 /// A dense row-major f32 tensor.
 #[derive(Debug, Clone, PartialEq)]
@@ -126,10 +127,76 @@ fn matmul(a: &NumTensor, b: &NumTensor) -> Result<NumTensor, GraphError> {
     Ok(NumTensor::unchecked(data, vec![m, n]))
 }
 
-fn gelu(x: f32) -> f32 {
-    // tanh approximation
-    let c = (2.0f32 / std::f32::consts::PI).sqrt();
-    0.5 * x * (1.0 + (c * (x + 0.044_715 * x.powi(3))).tanh())
+/// Apply a per-vector slice kernel along the last axis of a 1-D or 2-D tensor.
+/// (Softmax / LayerNorm normalize over the trailing dimension, i.e. per row.)
+fn map_last_axis(
+    a: &NumTensor,
+    f: impl Fn(&[f32]) -> Result<Vec<f32>, GraphError>,
+) -> Result<NumTensor, GraphError> {
+    match a.shape.len() {
+        1 => NumTensor::new(f(&a.data)?, a.shape.clone()),
+        2 => {
+            let (rows, cols) = (a.shape[0], a.shape[1]);
+            let mut out = Vec::with_capacity(a.data.len());
+            for r in 0..rows {
+                out.extend(f(&a.data[r * cols..(r + 1) * cols])?);
+            }
+            NumTensor::new(out, a.shape.clone())
+        }
+        _ => Err(GraphError::ExecutionError(format!(
+            "op supports 1-D/2-D tensors only, got shape {:?}",
+            a.shape
+        ))),
+    }
+}
+
+/// Softmax over the requested axis (negative axes count from the end).
+fn softmax_op(a: &NumTensor, axis: i64) -> Result<NumTensor, GraphError> {
+    let rank = a.shape.len() as i64;
+    let ax = if axis < 0 { axis + rank } else { axis };
+    match a.shape.len() {
+        1 => NumTensor::new(numerics::softmax(&a.data), a.shape.clone()),
+        2 if ax == 1 => map_last_axis(a, |row| Ok(numerics::softmax(row))),
+        2 if ax == 0 => {
+            // Softmax down each column.
+            let (rows, cols) = (a.shape[0], a.shape[1]);
+            let mut out = vec![0.0f32; a.data.len()];
+            for c in 0..cols {
+                let col: Vec<f32> = (0..rows).map(|r| a.data[r * cols + c]).collect();
+                let sm = numerics::softmax(&col);
+                for r in 0..rows {
+                    out[r * cols + c] = sm[r];
+                }
+            }
+            NumTensor::new(out, a.shape.clone())
+        }
+        _ => Err(GraphError::ExecutionError(format!(
+            "softmax: unsupported axis {axis} for shape {:?}",
+            a.shape
+        ))),
+    }
+}
+
+/// Layer normalization over the trailing dimension (no affine params; the graph
+/// op carries none). `normalized_shape`, when given, must match that dimension.
+fn layer_norm_op(
+    a: &NumTensor,
+    normalized_shape: &[usize],
+    eps: f64,
+) -> Result<NumTensor, GraphError> {
+    let last = *a.shape.last().ok_or_else(|| {
+        GraphError::ShapeMismatch("layer_norm: scalar has no axis to normalize".to_string())
+    })?;
+    if !normalized_shape.is_empty() {
+        let prod: usize = normalized_shape.iter().product();
+        if prod != last {
+            return Err(GraphError::ShapeMismatch(format!(
+                "layer_norm: normalized_shape {normalized_shape:?} (={prod}) != last dim {last}"
+            )));
+        }
+    }
+    let eps = eps as f32;
+    map_last_axis(a, |row| numerics::layer_norm(row, None, None, eps))
 }
 
 fn eval_node(
@@ -153,7 +220,13 @@ fn eval_node(
         TensorOp::ReLU => Ok(unary(operand(node, env, 0)?, |x| x.max(0.0))),
         TensorOp::Tanh => Ok(unary(operand(node, env, 0)?, |x| x.tanh())),
         TensorOp::Sigmoid => Ok(unary(operand(node, env, 0)?, |x| 1.0 / (1.0 + (-x).exp()))),
-        TensorOp::GELU => Ok(unary(operand(node, env, 0)?, gelu)),
+        TensorOp::GELU => Ok(unary(operand(node, env, 0)?, numerics::gelu)),
+        TensorOp::SiLU => Ok(unary(operand(node, env, 0)?, numerics::silu)),
+        TensorOp::Softmax { axis } => softmax_op(operand(node, env, 0)?, *axis),
+        TensorOp::LayerNorm {
+            normalized_shape,
+            eps,
+        } => layer_norm_op(operand(node, env, 0)?, normalized_shape, *eps),
         TensorOp::Exp => Ok(unary(operand(node, env, 0)?, |x| x.exp())),
         TensorOp::Log => Ok(unary(operand(node, env, 0)?, |x| x.ln())),
         TensorOp::Sqrt => Ok(unary(operand(node, env, 0)?, |x| x.sqrt())),
@@ -308,6 +381,78 @@ mod tests {
         assert!(matches!(
             execute(&g, &inputs),
             Err(GraphError::ExecutionError(_))
+        ));
+    }
+
+    fn run_unary(op: TensorOp, data: Vec<f32>, shape: Vec<usize>) -> NumTensor {
+        let mut g = ComputationGraph::new();
+        g.add_node(input("a")).unwrap();
+        g.mark_input("a".into());
+        g.add_node(GraphNode::new("y".into(), op).add_input("a".into()))
+            .unwrap();
+        g.mark_output("y".into());
+        let mut inputs = HashMap::new();
+        inputs.insert("a".into(), NumTensor::new(data, shape).unwrap());
+        execute_output(&g, &inputs, "y").unwrap()
+    }
+
+    #[test]
+    fn silu_op_matches_kernel() {
+        let y = run_unary(TensorOp::SiLU, vec![0.0, 1.0], vec![1, 2]);
+        assert!((y.data[0]).abs() < 1e-6);
+        assert!((y.data[1] - numerics::silu(1.0)).abs() < 1e-7);
+    }
+
+    #[test]
+    fn softmax_op_per_row() {
+        // 2x2, axis -1 → each row sums to 1.
+        let y = run_unary(TensorOp::Softmax { axis: -1 }, vec![1.0, 1.0, 0.0, 2.0], vec![2, 2]);
+        assert!((y.data[0] + y.data[1] - 1.0).abs() < 1e-6);
+        assert!((y.data[2] + y.data[3] - 1.0).abs() < 1e-6);
+        assert!((y.data[0] - 0.5).abs() < 1e-6); // equal logits → 0.5 each
+    }
+
+    #[test]
+    fn softmax_op_axis0_per_column() {
+        let y = run_unary(TensorOp::Softmax { axis: 0 }, vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]);
+        // Each column has equal entries → 0.5 everywhere.
+        assert!(y.data.iter().all(|&v| (v - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn layer_norm_op_zero_mean_unit_var_per_row() {
+        let y = run_unary(
+            TensorOp::LayerNorm { normalized_shape: vec![3], eps: 1e-5 },
+            vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0],
+            vec![2, 3],
+        );
+        for row in [&y.data[0..3], &y.data[3..6]] {
+            let mean = row.iter().sum::<f32>() / 3.0;
+            let var = row.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / 3.0;
+            assert!(mean.abs() < 1e-4, "mean {mean}");
+            assert!((var - 1.0).abs() < 1e-3, "var {var}");
+        }
+    }
+
+    #[test]
+    fn layer_norm_op_rejects_mismatched_normalized_shape() {
+        let mut g = ComputationGraph::new();
+        g.add_node(input("a")).unwrap();
+        g.mark_input("a".into());
+        g.add_node(
+            GraphNode::new(
+                "y".into(),
+                TensorOp::LayerNorm { normalized_shape: vec![5], eps: 1e-5 },
+            )
+            .add_input("a".into()),
+        )
+        .unwrap();
+        g.mark_output("y".into());
+        let mut inputs = HashMap::new();
+        inputs.insert("a".into(), NumTensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
+        assert!(matches!(
+            execute(&g, &inputs),
+            Err(GraphError::ShapeMismatch(_))
         ));
     }
 }

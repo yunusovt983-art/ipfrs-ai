@@ -92,6 +92,9 @@ pub enum TensorOp {
     /// Activation: GELU (Gaussian Error Linear Unit)
     GELU,
 
+    /// Activation: SiLU / Swish (x · sigmoid(x))
+    SiLU,
+
     /// Activation: Softmax along axis
     Softmax { axis: i64 },
 
@@ -171,6 +174,7 @@ impl TensorOp {
             | TensorOp::Tanh
             | TensorOp::Sigmoid
             | TensorOp::GELU
+            | TensorOp::SiLU
             | TensorOp::Softmax { .. }
             | TensorOp::LayerNorm { .. }
             | TensorOp::BatchNorm { .. }
@@ -220,6 +224,7 @@ impl TensorOp {
             | TensorOp::Tanh
             | TensorOp::Sigmoid
             | TensorOp::GELU
+            | TensorOp::SiLU
             | TensorOp::Exp
             | TensorOp::Log
             | TensorOp::Sqrt
