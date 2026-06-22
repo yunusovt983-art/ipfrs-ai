@@ -73,9 +73,11 @@ ACL-порты, малый вес зависимостей; именно это 
 > **DoD выполнен:** интеграционный тест `distributed_exec_integration.rs` — 2-stage граф исполняется
 > на 2 живых libp2p-нодах (stage 1 на узле B по сети, stage 2 на узле A локально; активация `h`
 > стримится B→A). 32 + 2 юнит-теста + интеграционный — зелёные, clippy чист.
-> **Остаётся (Spike 2c, опц.):** связать `graph_partitioner`/`build_communication_schedule` →
-> авто-построение `PipelineStage` из партиций (сейчас стадии задаёт вызывающий вручную); тюнинг
-> размера CBOR-сообщений под крупные активации.
+> ✅ **Spike 2c ГОТОВ 2026-06-22:** `distributed::planner` — `plan_pipeline(graph, placement)` строит
+> самодостаточные подграфы (с Input-placeholder'ами на границах) + топо-упорядоченные `PipelineStage`;
+> `plan_pipeline_contiguous(graph, peers)` — contiguous-сплит для pipeline-параллелизма; `Node::
+> run_graph_distributed(graph, peers, initial)` — авто-план + запуск. 4 теста (вкл. эквивалентность
+> «пайплайн ≡ монолит»). **Остаётся:** тюнинг размера CBOR под крупные активации.
 
 | Взять | Откуда | Файл (проверить) | Паттерн | Связь / Трудоёмкость |
 |-------|--------|------------------|---------|----------------------|
@@ -187,12 +189,16 @@ prefix-cache (`trustformers-serve/src/{kv_cache,prefix_cache}/`), баланси
    инверсию зависимостей (`wire`/`transport` в tensorlogic, протокол в network, оркестрация в `Node`).
    DoD достигнут: 2-stage граф на 2 живых нодах (интеграционный тест `distributed_exec_integration.rs`).
    Деталь — `NetworkNode` `!Sync` (держит `Swarm`), поэтому транспорт реализован на Send+Sync
-   `ActivationHandle`, а не на `&NetworkNode`. **Spike 2c (опц.):** авто-`PipelineStage` из партиций.
+   `ActivationHandle`, а не на `&NetworkNode`.
+   ✅ **Spike 2c — ГОТОВО 2026-06-22:** `distributed::planner` (`plan_pipeline`/`plan_pipeline_contiguous`)
+   авто-строит самодостаточные `PipelineStage` из размещения node→peer; `Node::run_graph_distributed`.
 3. ✅ **Spike 3 — Conformist-движок** — **ГОТОВО 2026-06-22.** `NumTensor` за трейтом `TlExecutor`
    (`tl_executor`: трейт + `ElemOp`/`ReduceOp` по форме `tensorlogic-infer` + бэкенд `NumExecutor`) +
    ACL-порт чистых f32-kernel'ов из `oxigaf/numerics.rs` (`numerics`: softmax/log_softmax/layer_norm/
    rms_norm/gelu/silu); граф-исполнитель считает `Softmax`/`LayerNorm`/новый `SiLU`. 22 теста зелёные.
-   **Spike 3b (опц.):** обобщить einsum/reduce в `NumExecutor`; переключить `numeric_exec` на `TlExecutor`.
+   ✅ **Spike 3b — ГОТОВО 2026-06-22:** `NumExecutor.einsum` обобщён до 2-операндного контракшна
+   (matmul/matvec/dot/outer/batched), `reduce` — до N-D мульти-оси; `numeric_exec` исполняет core-ops
+   (elementwise/matmul/reduce) через `TlExecutor` (`execute_with<E>`), плюс заработали `ReduceSum`/`ReduceMean`.
 4. **Среднесрочное**: SMT-судья → proof-carrying; агрегация Krum → FedAvg; трекинг потока градиентов.
 
 **Ограничитель (из `ARCHITECTURE.md` §4):** держать типы апстрима за нашим ACL

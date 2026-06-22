@@ -19,6 +19,8 @@
 use std::collections::HashMap;
 
 use ipfrs_core::Result;
+use ipfrs_tensorlogic::computation_graph::ComputationGraph;
+use ipfrs_tensorlogic::distributed::planner::plan_pipeline_contiguous;
 use ipfrs_tensorlogic::distributed::transport::{execute_pipeline, PipelineStage};
 use ipfrs_tensorlogic::distributed::wire::{execute_stage, StageRequest, StageResponse, WireTensor};
 
@@ -63,5 +65,24 @@ impl Node {
         execute_pipeline(&stages, &handle, initial)
             .await
             .map_err(|e| ipfrs_core::error::Error::Internal(e.to_string()))
+    }
+
+    /// Execute a whole `graph` across `peers` by auto-planning the pipeline
+    /// (RoadMap Phase 5.1, Spike 2c).
+    ///
+    /// Splits the graph into `peers.len()` contiguous topological stages (one per
+    /// peer), builds self-contained subgraphs with boundary `Input` placeholders,
+    /// and drives them with [`run_distributed_pipeline`](Self::run_distributed_pipeline).
+    /// `initial` must supply the graph's external inputs. Returns the produced
+    /// activation environment — pluck the graph's outputs by id.
+    pub async fn run_graph_distributed(
+        &self,
+        graph: &ComputationGraph,
+        peers: &[String],
+        initial: HashMap<String, WireTensor>,
+    ) -> Result<HashMap<String, WireTensor>> {
+        let stages = plan_pipeline_contiguous(graph, peers)
+            .map_err(|e| ipfrs_core::error::Error::Internal(e.to_string()))?;
+        self.run_distributed_pipeline(stages, initial).await
     }
 }

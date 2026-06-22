@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use crate::computation_graph::{ComputationGraph, GraphError, GraphNode, TensorOp};
 use crate::numerics;
+use crate::tl_executor::{ElemOp, NumExecutor, ReduceOp, TlExecutor};
 
 /// A dense row-major f32 tensor.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,12 +39,31 @@ impl NumTensor {
     }
 }
 
-/// Execute `graph` numerically, given values for its `Input`/`Constant` nodes
-/// (keyed by node id). Returns the value of every node, indexed by node id.
+/// Execute `graph` numerically with the default [`NumExecutor`] backend, given
+/// values for its `Input`/`Constant` nodes (keyed by node id). Returns the value
+/// of every node, indexed by node id.
 pub fn execute(
     graph: &ComputationGraph,
     inputs: &HashMap<String, NumTensor>,
 ) -> Result<HashMap<String, NumTensor>, GraphError> {
+    execute_with(graph, inputs, &mut NumExecutor::new())
+}
+
+/// Execute `graph` with an explicit [`TlExecutor`] backend.
+///
+/// Core kernels — element-wise arithmetic / activations (`elem_op*`), matmul
+/// (`einsum`) and reductions (`reduce`) — are delegated to `exec`, so a different
+/// backend (GPU, SciRS2, …) can drive the same graph. Structural and axis-aware
+/// ops the trait does not cover (`Reshape`, `Transpose`, `Pow`, `Softmax`,
+/// `LayerNorm`) are evaluated directly on the dense `f32` representation.
+pub fn execute_with<E>(
+    graph: &ComputationGraph,
+    inputs: &HashMap<String, NumTensor>,
+    exec: &mut E,
+) -> Result<HashMap<String, NumTensor>, GraphError>
+where
+    E: TlExecutor<Tensor = NumTensor, Error = GraphError>,
+{
     let order = graph.topological_sort()?;
     let mut env: HashMap<String, NumTensor> = HashMap::new();
     for id in &order {
@@ -51,7 +71,7 @@ pub fn execute(
             .nodes
             .get(id)
             .ok_or_else(|| GraphError::NodeNotFound(id.clone()))?;
-        let val = eval_node(node, &env, inputs)?;
+        let val = eval_node(node, &env, inputs, exec)?;
         env.insert(id.clone(), val);
     }
     Ok(env)
@@ -80,51 +100,35 @@ fn operand<'a>(
     env.get(id).ok_or_else(|| GraphError::NodeNotFound(id.clone()))
 }
 
-fn elementwise_bin(
-    a: &NumTensor,
-    b: &NumTensor,
-    op: &str,
-    f: impl Fn(f32, f32) -> f32,
-) -> Result<NumTensor, GraphError> {
-    if a.shape != b.shape {
-        return Err(GraphError::ShapeMismatch(format!(
-            "{}: {:?} vs {:?}",
-            op, a.shape, b.shape
-        )));
-    }
-    let data = a.data.iter().zip(&b.data).map(|(x, y)| f(*x, *y)).collect();
-    Ok(NumTensor::unchecked(data, a.shape.clone()))
-}
-
 fn unary(a: &NumTensor, f: impl Fn(f32) -> f32) -> NumTensor {
     NumTensor::unchecked(a.data.iter().map(|x| f(*x)).collect(), a.shape.clone())
 }
 
-fn matmul(a: &NumTensor, b: &NumTensor) -> Result<NumTensor, GraphError> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(GraphError::ShapeMismatch(
-            "matmul requires 2-D operands".to_string(),
-        ));
+/// Restore reduced axes as size-1 dims when an op requested `keepdims`.
+fn apply_keepdims(
+    reduced: NumTensor,
+    orig_rank: usize,
+    axes: &[usize],
+    keepdims: bool,
+) -> Result<NumTensor, GraphError> {
+    if !keepdims {
+        return Ok(reduced);
     }
-    let (m, k) = (a.shape[0], a.shape[1]);
-    let (k2, n) = (b.shape[0], b.shape[1]);
-    if k != k2 {
-        return Err(GraphError::ShapeMismatch(format!(
-            "matmul inner dims: {}x{} · {}x{}",
-            m, k, k2, n
-        )));
-    }
-    let mut data = vec![0.0f32; m * n];
-    for i in 0..m {
-        for j in 0..n {
-            let mut s = 0.0f32;
-            for p in 0..k {
-                s += a.data[i * k + p] * b.data[p * n + j];
+    let shape = if axes.is_empty() {
+        vec![1; orig_rank]
+    } else {
+        let mut s = reduced.shape.clone();
+        // `reduced` already dropped the axes; re-insert 1s at each reduced position.
+        let mut sorted = axes.to_vec();
+        sorted.sort_unstable();
+        for &ax in &sorted {
+            if ax <= s.len() {
+                s.insert(ax, 1);
             }
-            data[i * n + j] = s;
         }
-    }
-    Ok(NumTensor::unchecked(data, vec![m, n]))
+        s
+    };
+    NumTensor::new(reduced.data, shape)
 }
 
 /// Apply a per-vector slice kernel along the last axis of a 1-D or 2-D tensor.
@@ -199,37 +203,63 @@ fn layer_norm_op(
     map_last_axis(a, |row| numerics::layer_norm(row, None, None, eps))
 }
 
-fn eval_node(
+fn eval_node<E>(
     node: &GraphNode,
     env: &HashMap<String, NumTensor>,
     inputs: &HashMap<String, NumTensor>,
-) -> Result<NumTensor, GraphError> {
+    exec: &mut E,
+) -> Result<NumTensor, GraphError>
+where
+    E: TlExecutor<Tensor = NumTensor, Error = GraphError>,
+{
     match &node.op {
         TensorOp::Input { .. } | TensorOp::Constant { .. } => inputs
             .get(&node.id)
             .cloned()
             .ok_or_else(|| GraphError::MissingInput(node.id.clone())),
 
-        TensorOp::Add => elementwise_bin(operand(node, env, 0)?, operand(node, env, 1)?, "add", |x, y| x + y),
-        TensorOp::Sub => elementwise_bin(operand(node, env, 0)?, operand(node, env, 1)?, "sub", |x, y| x - y),
-        TensorOp::Mul => elementwise_bin(operand(node, env, 0)?, operand(node, env, 1)?, "mul", |x, y| x * y),
-        TensorOp::Div => elementwise_bin(operand(node, env, 0)?, operand(node, env, 1)?, "div", |x, y| x / y),
+        // Element-wise arithmetic, matmul and reductions go through the backend.
+        TensorOp::Add => {
+            exec.elem_op_binary(ElemOp::Add, operand(node, env, 0)?, operand(node, env, 1)?)
+        }
+        TensorOp::Sub => {
+            exec.elem_op_binary(ElemOp::Subtract, operand(node, env, 0)?, operand(node, env, 1)?)
+        }
+        TensorOp::Mul => {
+            exec.elem_op_binary(ElemOp::Multiply, operand(node, env, 0)?, operand(node, env, 1)?)
+        }
+        TensorOp::Div => {
+            exec.elem_op_binary(ElemOp::Divide, operand(node, env, 0)?, operand(node, env, 1)?)
+        }
 
-        TensorOp::MatMul => matmul(operand(node, env, 0)?, operand(node, env, 1)?),
+        TensorOp::MatMul => {
+            let (a, b) = (operand(node, env, 0)?.clone(), operand(node, env, 1)?.clone());
+            exec.einsum("ij,jk->ik", &[a, b])
+        }
 
-        TensorOp::ReLU => Ok(unary(operand(node, env, 0)?, |x| x.max(0.0))),
-        TensorOp::Tanh => Ok(unary(operand(node, env, 0)?, |x| x.tanh())),
-        TensorOp::Sigmoid => Ok(unary(operand(node, env, 0)?, |x| 1.0 / (1.0 + (-x).exp()))),
-        TensorOp::GELU => Ok(unary(operand(node, env, 0)?, numerics::gelu)),
-        TensorOp::SiLU => Ok(unary(operand(node, env, 0)?, numerics::silu)),
+        TensorOp::ReLU => exec.elem_op(ElemOp::Relu, operand(node, env, 0)?),
+        TensorOp::Tanh => exec.elem_op(ElemOp::Tanh, operand(node, env, 0)?),
+        TensorOp::Sigmoid => exec.elem_op(ElemOp::Sigmoid, operand(node, env, 0)?),
+        TensorOp::GELU => exec.elem_op(ElemOp::Gelu, operand(node, env, 0)?),
+        TensorOp::SiLU => exec.elem_op(ElemOp::Silu, operand(node, env, 0)?),
+        TensorOp::Exp => exec.elem_op(ElemOp::Exp, operand(node, env, 0)?),
+        TensorOp::Log => exec.elem_op(ElemOp::Log, operand(node, env, 0)?),
+        TensorOp::Sqrt => exec.elem_op(ElemOp::Sqrt, operand(node, env, 0)?),
+        TensorOp::ReduceSum { axes, keepdims } => {
+            let r = exec.reduce(ReduceOp::Sum, operand(node, env, 0)?, axes)?;
+            apply_keepdims(r, operand(node, env, 0)?.shape.len(), axes, *keepdims)
+        }
+        TensorOp::ReduceMean { axes, keepdims } => {
+            let r = exec.reduce(ReduceOp::Mean, operand(node, env, 0)?, axes)?;
+            apply_keepdims(r, operand(node, env, 0)?.shape.len(), axes, *keepdims)
+        }
+
+        // Axis-aware / structural ops are evaluated directly (not in the trait).
         TensorOp::Softmax { axis } => softmax_op(operand(node, env, 0)?, *axis),
         TensorOp::LayerNorm {
             normalized_shape,
             eps,
         } => layer_norm_op(operand(node, env, 0)?, normalized_shape, *eps),
-        TensorOp::Exp => Ok(unary(operand(node, env, 0)?, |x| x.exp())),
-        TensorOp::Log => Ok(unary(operand(node, env, 0)?, |x| x.ln())),
-        TensorOp::Sqrt => Ok(unary(operand(node, env, 0)?, |x| x.sqrt())),
         TensorOp::Pow { exponent } => {
             let e = *exponent as f32;
             Ok(unary(operand(node, env, 0)?, move |x| x.powf(e)))
@@ -432,6 +462,59 @@ mod tests {
             assert!(mean.abs() < 1e-4, "mean {mean}");
             assert!((var - 1.0).abs() < 1e-3, "var {var}");
         }
+    }
+
+    #[test]
+    fn reduce_sum_op_drops_and_keepdims() {
+        // 2x2 sum over axis 0 → [4,6] shape [2]
+        let y = run_unary(
+            TensorOp::ReduceSum { axes: vec![0], keepdims: false },
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![2, 2],
+        );
+        assert_eq!(y.shape, vec![2]);
+        assert_eq!(y.data, vec![4.0, 6.0]);
+        // keepdims → shape [1,2]
+        let yk = run_unary(
+            TensorOp::ReduceSum { axes: vec![0], keepdims: true },
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![2, 2],
+        );
+        assert_eq!(yk.shape, vec![1, 2]);
+        assert_eq!(yk.data, vec![4.0, 6.0]);
+    }
+
+    #[test]
+    fn reduce_mean_op_whole_tensor() {
+        let y = run_unary(
+            TensorOp::ReduceMean { axes: vec![], keepdims: false },
+            vec![1.0, 2.0, 3.0, 4.0],
+            vec![2, 2],
+        );
+        assert_eq!(y.data, vec![2.5]);
+    }
+
+    #[test]
+    fn execute_with_explicit_backend_matches_default() {
+        use crate::tl_executor::NumExecutor;
+        let mut g = ComputationGraph::new();
+        g.add_node(input("a")).unwrap();
+        g.add_node(input("b")).unwrap();
+        g.mark_input("a".into());
+        g.mark_input("b".into());
+        g.add_node(
+            GraphNode::new("m".into(), TensorOp::MatMul)
+                .add_input("a".into())
+                .add_input("b".into()),
+        )
+        .unwrap();
+        g.mark_output("m".into());
+        let mut inputs = HashMap::new();
+        inputs.insert("a".into(), NumTensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        inputs.insert("b".into(), NumTensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap());
+        let mut exec = NumExecutor::new();
+        let env = execute_with(&g, &inputs, &mut exec).unwrap();
+        assert_eq!(env["m"].data, vec![19.0, 22.0, 43.0, 50.0]);
     }
 
     #[test]

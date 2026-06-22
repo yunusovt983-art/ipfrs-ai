@@ -30,12 +30,14 @@
 //! call these tested primitives.
 
 pub mod collectives;
+pub mod planner;
 pub mod schedule;
 pub mod sharding;
 pub mod transport;
 pub mod wire;
 
 pub use collectives::{all_gather, all_reduce, reduce_scatter, ReduceOp};
+pub use planner::{plan_pipeline, plan_pipeline_contiguous};
 pub use schedule::{build_communication_schedule, CommunicationSchedule, CommunicationStage, DataTransfer};
 pub use sharding::{gather_shards, plan_shards, shard_tensor, ShardSpec, ShardStrategy};
 pub use transport::{execute_pipeline, ActivationTransport, LocalTransport, PipelineStage};

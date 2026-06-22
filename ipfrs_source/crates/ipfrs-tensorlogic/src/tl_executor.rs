@@ -16,6 +16,8 @@
 //! ACL-ported [`numerics`](crate::numerics) kernels. The enum variant set is a
 //! pragmatic subset of the upstream catalogue — what our engine actually computes.
 
+use std::collections::{HashMap, HashSet};
+
 use crate::computation_graph::GraphError;
 use crate::numeric_exec::NumTensor;
 use crate::numerics;
@@ -139,11 +141,10 @@ impl TlExecutor for NumExecutor {
     type Error = GraphError;
 
     fn einsum(&mut self, spec: &str, inputs: &[NumTensor]) -> Result<NumTensor, GraphError> {
-        // Minimal but real: support 2-operand 2-D matrix multiplication, the
-        // `ab,bc->ac` family (whitespace ignored). Anything else is a follow-up.
+        // General 2-operand contraction (single-char labels). Covers matmul,
+        // batched matmul, matrix-vector, dot, outer — any spec whose contracted
+        // labels are those present in the inputs but absent from the output.
         let normalized: String = spec.chars().filter(|c| !c.is_whitespace()).collect();
-
-        // Parse "<lhs>,<rhs>-><out>".
         let (lhs, out) = normalized
             .split_once("->")
             .ok_or_else(|| GraphError::ExecutionError(format!("einsum: missing '->' in '{spec}'")))?;
@@ -153,20 +154,7 @@ impl TlExecutor for NumExecutor {
                 "einsum: only 2-operand contraction supported, got spec '{spec}'"
             )));
         }
-        let (a_sub, b_sub) = (operands[0], operands[1]);
-        // Classic matmul: ij,jk->ik with the shared middle index contracted.
-        if a_sub.len() == 2
-            && b_sub.len() == 2
-            && out.len() == 2
-            && a_sub.as_bytes()[1] == b_sub.as_bytes()[0]
-            && out.as_bytes()[0] == a_sub.as_bytes()[0]
-            && out.as_bytes()[1] == b_sub.as_bytes()[1]
-        {
-            return matmul_2d(&inputs[0], &inputs[1]);
-        }
-        Err(GraphError::ExecutionError(format!(
-            "einsum: unsupported contraction '{spec}' (only matmul ab,bc->ac)"
-        )))
+        einsum_2op(operands[0], operands[1], out, &inputs[0], &inputs[1])
     }
 
     fn elem_op(&mut self, op: ElemOp, x: &NumTensor) -> Result<NumTensor, GraphError> {
@@ -224,91 +212,150 @@ impl TlExecutor for NumExecutor {
         x: &NumTensor,
         axes: &[usize],
     ) -> Result<NumTensor, GraphError> {
-        let all_axes = axes.is_empty() || axes.len() == x.shape.len();
-
-        // Whole-tensor reduction → scalar [1].
-        if all_axes {
-            let acc = x.data.iter().fold(reduce_init(op), |a, &v| reduce_step(op, a, v));
-            let val = if op == ReduceOp::Mean {
-                acc / x.data.len().max(1) as f32
-            } else {
-                acc
-            };
-            return NumTensor::new(vec![val], vec![1]);
-        }
-
-        // 2-D single-axis reduction.
-        if x.shape.len() == 2 && axes.len() == 1 {
-            let (rows, cols) = (x.shape[0], x.shape[1]);
-            return match axes[0] {
-                0 => {
-                    // Reduce rows → one value per column.
-                    let mut out = vec![reduce_init(op); cols];
-                    for (c, slot) in out.iter_mut().enumerate() {
-                        let mut acc = reduce_init(op);
-                        for r in 0..rows {
-                            acc = reduce_step(op, acc, x.data[r * cols + c]);
-                        }
-                        *slot = if op == ReduceOp::Mean {
-                            acc / rows.max(1) as f32
-                        } else {
-                            acc
-                        };
-                    }
-                    NumTensor::new(out, vec![1, cols])
-                }
-                1 => {
-                    // Reduce columns → one value per row.
-                    let mut out = vec![reduce_init(op); rows];
-                    for (r, slot) in out.iter_mut().enumerate() {
-                        let row = &x.data[r * cols..(r + 1) * cols];
-                        let acc = row.iter().fold(reduce_init(op), |a, &v| reduce_step(op, a, v));
-                        *slot = if op == ReduceOp::Mean {
-                            acc / cols.max(1) as f32
-                        } else {
-                            acc
-                        };
-                    }
-                    NumTensor::new(out, vec![rows, 1])
-                }
-                d => Err(GraphError::ExecutionError(format!(
-                    "reduce: axis {d} out of range for 2-D tensor"
-                ))),
-            };
-        }
-
-        Err(GraphError::ExecutionError(format!(
-            "reduce: unsupported axes {axes:?} for shape {:?}",
-            x.shape
-        )))
+        reduce_nd(op, x, axes)
     }
 }
 
-/// 2-D matrix multiply, shared by `einsum`'s matmul path.
-fn matmul_2d(a: &NumTensor, b: &NumTensor) -> Result<NumTensor, GraphError> {
-    if a.shape.len() != 2 || b.shape.len() != 2 {
-        return Err(GraphError::ShapeMismatch(
-            "einsum matmul requires 2-D operands".to_string(),
-        ));
+/// Row-major strides for `shape`.
+fn strides(shape: &[usize]) -> Vec<usize> {
+    let mut s = vec![1usize; shape.len()];
+    for i in (0..shape.len().saturating_sub(1)).rev() {
+        s[i] = s[i + 1] * shape[i + 1];
     }
-    let (m, k) = (a.shape[0], a.shape[1]);
-    let (k2, n) = (b.shape[0], b.shape[1]);
-    if k != k2 {
+    s
+}
+
+/// Advance a mixed-radix odometer `idx` over `dims` (last axis fastest). Returns
+/// `false` once it wraps back to all-zero (i.e. the full space was covered).
+fn odometer_next(idx: &mut [usize], dims: &[usize]) -> bool {
+    for k in (0..idx.len()).rev() {
+        idx[k] += 1;
+        if idx[k] < dims[k] {
+            return true;
+        }
+        idx[k] = 0;
+    }
+    false
+}
+
+/// General 2-operand einsum (single-char labels, no repeats within an operand).
+/// Contracted labels = those present in the inputs but absent from the output;
+/// they are summed over. Covers matmul, batched matmul, matrix-vector, dot, outer.
+fn einsum_2op(
+    a_sub: &str,
+    b_sub: &str,
+    out_sub: &str,
+    a: &NumTensor,
+    b: &NumTensor,
+) -> Result<NumTensor, GraphError> {
+    let a_lbl: Vec<char> = a_sub.chars().collect();
+    let b_lbl: Vec<char> = b_sub.chars().collect();
+    let o_lbl: Vec<char> = out_sub.chars().collect();
+    if a_lbl.len() != a.shape.len() || b_lbl.len() != b.shape.len() {
         return Err(GraphError::ShapeMismatch(format!(
-            "einsum matmul inner dims: {m}x{k} · {k2}x{n}"
+            "einsum: subscripts '{a_sub}','{b_sub}' do not match ranks {:?},{:?}",
+            a.shape, b.shape
         )));
     }
-    let mut data = vec![0.0f32; m * n];
-    for i in 0..m {
-        for j in 0..n {
-            let mut s = 0.0f32;
-            for p in 0..k {
-                s += a.data[i * k + p] * b.data[p * n + j];
+
+    // label -> size, checked for consistency across both operands.
+    let mut size: HashMap<char, usize> = HashMap::new();
+    for (lbls, shape) in [(&a_lbl, &a.shape), (&b_lbl, &b.shape)] {
+        for (i, &l) in lbls.iter().enumerate() {
+            match size.get(&l) {
+                Some(&prev) if prev != shape[i] => {
+                    return Err(GraphError::ShapeMismatch(format!(
+                        "einsum: label '{l}' bound to {prev} and {}",
+                        shape[i]
+                    )))
+                }
+                _ => {
+                    size.insert(l, shape[i]);
+                }
             }
-            data[i * n + j] = s;
         }
     }
-    NumTensor::new(data, vec![m, n])
+    for &l in &o_lbl {
+        if !size.contains_key(&l) {
+            return Err(GraphError::ExecutionError(format!(
+                "einsum: output label '{l}' not present in inputs"
+            )));
+        }
+    }
+
+    // All distinct labels: output (free) labels first, then the contracted ones.
+    let mut all: Vec<char> = o_lbl.clone();
+    for &l in a_lbl.iter().chain(b_lbl.iter()) {
+        if !all.contains(&l) {
+            all.push(l);
+        }
+    }
+    let dims: Vec<usize> = all.iter().map(|l| size[l]).collect();
+    let pos: HashMap<char, usize> = all.iter().enumerate().map(|(i, &l)| (l, i)).collect();
+
+    let a_str = strides(&a.shape);
+    let b_str = strides(&b.shape);
+    let o_shape: Vec<usize> = o_lbl.iter().map(|l| size[l]).collect();
+    let o_str = strides(&o_shape);
+    let o_len: usize = o_shape.iter().product::<usize>().max(1);
+
+    let total: usize = dims.iter().product::<usize>().max(1);
+    let mut out = vec![0.0f32; o_len];
+    let mut idx = vec![0usize; all.len()];
+    for _ in 0..total {
+        let a_off: usize = a_lbl.iter().enumerate().map(|(i, l)| idx[pos[l]] * a_str[i]).sum();
+        let b_off: usize = b_lbl.iter().enumerate().map(|(i, l)| idx[pos[l]] * b_str[i]).sum();
+        let o_off: usize = o_lbl.iter().enumerate().map(|(i, l)| idx[pos[l]] * o_str[i]).sum();
+        out[o_off] += a.data[a_off] * b.data[b_off];
+        if !odometer_next(&mut idx, &dims) {
+            break;
+        }
+    }
+    NumTensor::new(out, o_shape)
+}
+
+/// General N-D reduction over `axes` (the reduced axes are dropped). Empty `axes`
+/// — or a set covering every axis — reduces the whole tensor to a `[1]` scalar.
+fn reduce_nd(op: ReduceOp, x: &NumTensor, axes: &[usize]) -> Result<NumTensor, GraphError> {
+    let rank = x.shape.len();
+    for &ax in axes {
+        if ax >= rank {
+            return Err(GraphError::ExecutionError(format!(
+                "reduce: axis {ax} out of range for shape {:?}",
+                x.shape
+            )));
+        }
+    }
+    let axis_set: HashSet<usize> = axes.iter().copied().collect();
+
+    if axes.is_empty() || axis_set.len() == rank {
+        let acc = x.data.iter().fold(reduce_init(op), |a, &v| reduce_step(op, a, v));
+        let val = if op == ReduceOp::Mean {
+            acc / x.data.len().max(1) as f32
+        } else {
+            acc
+        };
+        return NumTensor::new(vec![val], vec![1]);
+    }
+
+    let keep: Vec<usize> = (0..rank).filter(|d| !axis_set.contains(d)).collect();
+    let out_shape: Vec<usize> = keep.iter().map(|&d| x.shape[d]).collect();
+    let out_len: usize = out_shape.iter().product::<usize>().max(1);
+    let count = (x.data.len() / out_len.max(1)).max(1);
+    let out_str = strides(&out_shape);
+
+    let mut out = vec![reduce_init(op); out_len];
+    let mut idx = vec![0usize; rank];
+    for &v in &x.data {
+        let o_off: usize = keep.iter().enumerate().map(|(j, &d)| idx[d] * out_str[j]).sum();
+        out[o_off] = reduce_step(op, out[o_off], v);
+        odometer_next(&mut idx, &x.shape);
+    }
+    if op == ReduceOp::Mean {
+        let c = count as f32;
+        out.iter_mut().for_each(|v| *v /= c);
+    }
+    NumTensor::new(out, out_shape)
 }
 
 #[cfg(test)]
@@ -356,17 +403,31 @@ mod tests {
     }
 
     #[test]
-    fn reduce_2d_axes() {
+    fn reduce_2d_axes_drop() {
         let mut e = NumExecutor::new();
         let x = t(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        // axis 0 → per column: [1+3, 2+4] = [4, 6]
+        // axis 0 → per column, dim dropped: [1+3, 2+4] = [4, 6], shape [2]
         let c = e.reduce(ReduceOp::Sum, &x, &[0]).unwrap();
-        assert_eq!(c.shape, vec![1, 2]);
+        assert_eq!(c.shape, vec![2]);
         assert_eq!(c.data, vec![4.0, 6.0]);
-        // axis 1 → per row: [1+2, 3+4] = [3, 7]
+        // axis 1 → per row: [1+2, 3+4] = [3, 7], shape [2]
         let r = e.reduce(ReduceOp::Sum, &x, &[1]).unwrap();
-        assert_eq!(r.shape, vec![2, 1]);
+        assert_eq!(r.shape, vec![2]);
         assert_eq!(r.data, vec![3.0, 7.0]);
+    }
+
+    #[test]
+    fn reduce_3d_multi_axis() {
+        let mut e = NumExecutor::new();
+        // shape [2,2,2], values 0..8.
+        let x = t((0..8).map(|v| v as f32).collect(), vec![2, 2, 2]);
+        // Reduce axes {0,2} → keep axis 1 (size 2).
+        // group by middle index: m=0 → {0,1,4,5}=10; m=1 → {2,3,6,7}=18.
+        let r = e.reduce(ReduceOp::Sum, &x, &[0, 2]).unwrap();
+        assert_eq!(r.shape, vec![2]);
+        assert_eq!(r.data, vec![10.0, 18.0]);
+        // Mean over all → 3.5
+        assert_eq!(e.reduce(ReduceOp::Mean, &x, &[]).unwrap().data, vec![3.5]);
     }
 
     #[test]
@@ -380,10 +441,38 @@ mod tests {
     }
 
     #[test]
-    fn einsum_unsupported_errs() {
+    fn einsum_matvec_dot_outer_batched() {
+        let mut e = NumExecutor::new();
+        // matrix-vector: ij,j->i  ([[1,2],[3,4]]·[1,1]) = [3,7]
+        let m = t(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let v = t(vec![1.0, 1.0], vec![2]);
+        assert_eq!(e.einsum("ij,j->i", &[m.clone(), v.clone()]).unwrap().data, vec![3.0, 7.0]);
+        // dot: i,i->  (scalar)
+        let d = e.einsum("i,i->", &[v.clone(), t(vec![2.0, 3.0], vec![2])]).unwrap();
+        assert_eq!(d.shape, vec![] as Vec<usize>);
+        assert_eq!(d.data, vec![5.0]);
+        // outer: i,j->ij
+        let o = e.einsum("i,j->ij", &[t(vec![1.0, 2.0], vec![2]), t(vec![3.0, 4.0], vec![2])]).unwrap();
+        assert_eq!(o.shape, vec![2, 2]);
+        assert_eq!(o.data, vec![3.0, 4.0, 6.0, 8.0]);
+        // batched matmul: bij,bjk->bik over batch of 1 → same as matmul
+        let ba = t(vec![1.0, 2.0, 3.0, 4.0], vec![1, 2, 2]);
+        let bb = t(vec![5.0, 6.0, 7.0, 8.0], vec![1, 2, 2]);
+        assert_eq!(
+            e.einsum("bij,bjk->bik", &[ba, bb]).unwrap().data,
+            vec![19.0, 22.0, 43.0, 50.0]
+        );
+    }
+
+    #[test]
+    fn einsum_invalid_errs() {
         let mut e = NumExecutor::new();
         let a = t(vec![1.0], vec![1, 1]);
-        assert!(e.einsum("i->i", std::slice::from_ref(&a)).is_err());
-        assert!(e.einsum("ij,jk,kl->il", &[a.clone(), a.clone(), a]).is_err());
+        // wrong operand count
+        assert!(e.einsum("ij,jk,kl->il", &[a.clone(), a.clone(), a.clone()]).is_err());
+        // subscript rank mismatch
+        assert!(e.einsum("ijk,kl->il", &[a.clone(), a.clone()]).is_err());
+        // output label not in inputs
+        assert!(e.einsum("ij,jk->iz", &[a.clone(), a]).is_err());
     }
 }
