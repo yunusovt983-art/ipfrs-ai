@@ -73,40 +73,40 @@ graph TD
 ## HLD — ANSI-схема (слои и потоки)
 
 ```text
-        CLI · Python · Node.js · WASM ·  gRPC / GraphQL / WS / HTTP
-                                  │
-        ┌─────────────────────────▼──────────────────────────────────┐
-        │  ipfrs-interface · ШЛЮЗ (Open Host Service / ACL)            │
-        │  auth(JWT-HS256) · TLS(rustls) · backpressure · geo_fetch    │
-        └─────────────────────────┬──────────────────────────────────┘
-                                  │  wire → домен
-        ┌─────────────────────────▼──────────────────────────────────┐
-        │  ipfrs · NODE (Application Facade / оркестратор)             │
-        │  add · get · search · infer · pin · dag · announce_model     │
-        └──┬───────────┬───────────┬───────────┬───────────┬──────────┘
-           │           │           │           │           │
-   ┌───────▼──┐ ┌──────▼─────┐ ┌───▼──────┐ ┌──▼─────────┐ │
-   │ STORAGE  │ │  NETWORK   │ │ SEMANTIC │ │TENSORLOGIC │ │
-   │ Sled·GC  │ │ libp2p·DHT │ │HNSW·Disk │ │20+ движков │ │
-   │ декорат. │ │ gossipsub  │ │ ANN·эмб. │ │autograd·FL │ │
-   │ Bloom→   │ │ block-     │ │ semantic │ │neuro-      │ │
-   │ Cache→   │ │ fetch·geo  │ │ DHT      │ │symbolic    │ │
-   │ Sled     │ │ репутация  │ │          │ │            │ │
-   └───────┬──┘ └──────┬─────┘ └───┬──────┘ └──┬─────────┘ │
-           │           │           │           │           │
-           │    ┌──────▼───────────▼───┐       │           │
-           │    │  TRANSPORT            │       │           │
-           │    │  Bitswap · Session    │◀──────┘  ┌────────▼────────┐
-           │    │  TensorSwap · WantList│          │  ❶ geo-инференс  │
-           │    └──────────┬────────────┘          │  announce_model →│
-           │               │                        │  gossip /models →│
-           └───────────┬───┴────────────┬───────────│  consumer →      │
-                       │                │           │  known_models →  │
-              ┌────────▼────────────────▼────────┐  │  geo_fetch_block │
-              │  ipfrs-core · SHARED KERNEL       │  └─────────────────┘
-              │  Cid · Block · Ipld · DAG · hash  │
-              └───────────────────────────────────┘
-              CID — единственный тип на границах всех контекстов
+         CLI · Python · Node.js · WASM · gRPC / GraphQL / WS / HTTP
+                                      │
+      ┌───────────────────────────────▼──────────────────────────────┐
+      │ ipfrs-interface · ШЛЮЗ (Open Host Service / ACL)             │
+      │ auth(JWT-HS256) · TLS(rustls) · backpressure · geo_fetch     │
+      └──────────────────────────────────────────────────────────────┘
+                                      │ wire → домен
+      ┌───────────────────────────────▼──────────────────────────────┐
+      │ ipfrs · NODE (Application Facade / оркестратор)              │
+      │ add · get · search · infer · pin · dag · announce_model      │
+      └──────┬───────────────┬───────────────┬───────────────┬───────┘
+             │               │               │               │
+             │               │               │               │
+      ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐ ┌──────▼──────┐
+      │ STORAGE     │ │ NETWORK     │ │ SEMANTIC    │ │ TENSORLOGIC │
+      │ Sled · GC   │ │ libp2p·DHT  │ │ HNSW·Disk   │ │ 20+ движков │
+      │ Bloom→Cache │ │ gossipsub   │ │ ANN · эмб.  │ │ autograd·FL │
+      │ → Sled      │ │ block-fetch │ │ semantic    │ │ neuro-symb  │
+      │ декораторы  │ │ geo·репут.  │ │ DHT         │ │ FL·градиенты│
+      └──────┬──────┘ └──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+             │               │               │               │
+             └───────────────┴───────┬───────┴───────────────┘
+                                     │
+                   ┌─────────────────▼────────────────┐
+                   │ TRANSPORT                        │
+                   │ Bitswap · Session · TensorSwap   │
+                   │ WantList · приоритеты want-list  │
+                   └─────────────────┬────────────────┘
+                                     │
+                 ┌───────────────────▼───────────────────┐
+                 │ ipfrs-core · SHARED KERNEL            │
+                 │ Cid · Block · Ipld · DAG · hash       │
+                 └───────────────────────────────────────┘
+            CID — единственный тип на границах всех контекстов
 ```
 
 > **Поток GET (упрощённо):** `Node.get(cid)` → L1-кэш → Sled → DHT `find_providers`
@@ -120,44 +120,23 @@ graph TD
 Реализовано в коде (RoadMap [06-GeoInference](RoadMap/06-GeoInference.md)).
 
 ```text
-  УЗЕЛ A (публикует)         DHT / gossipsub (libp2p)         УЗЕЛ B (запрашивает)
-  ══════════════════         ════════════════════════         ════════════════════
+   УЗЕЛ A (публикует)           DHT / gossipsub (libp2p)    УЗЕЛ B (запрашивает)
+   ══════════════════           ════════════════════════    ════════════════════
 
-  announce_model(cid)
-    │
-    ├─ provide(cid) ─────────▶ ┌────────────────────┐
-    │                          │  Kademlia DHT       │
-    │                          │  cid → [provider A] │
-    │                          └────────────────────┘
-    │
-    └─ publish(cid) ─────────▶ ┌────────────────────┐
-                               │ gossip /ipfrs/models│──┐
-                               └────────────────────┘  │  (по проводу)
-                                                        ▼
-                                          start_model_consumer (фоновая задача)
-                                          GossipMessage → decode → known_models[cid]++
-                                                        │
-                                       ┌────────────────┘
-                                       ▼  (позже, по запросу пользователя)
-                                  geo_fetch_block(cid)
-                                       │
-                  find_providers(cid)  │
-       ┌────────────────────┐  ◀───────┤
-       │  Kademlia DHT       │          │
-       │  → providers=[A,…]  │ ─────────▶ candidates[]
-       └────────────────────┘          │
-                                  plan_routing(RTT, region)   ← Phase 3 метрики
-                                  → primary = A  (+ k-1 hedge)
-                                       │
-   ┌──────────────────┐  Request{cid}  │
-   │ blockfetch        │ ◀──────────────┤  /ipfrs/blockfetch/1.0.0 (CBOR)
-   │ store.get(cid)    │                │
-   │ → bytes           │                │
-   └────────┬─────────┘                │
-            │  Response Block(data)     ▼
-            └─────────────────────────▶ verify  cid == hash(data)  ✓
-                                        backfill в локальный store
-                                        return Block
+   announce_model(cid)
+     ├─ provide(cid) ─────────▶ Kademlia DHT: cid → [A]
+     └─ publish(cid) ─────────▶ gossip /ipfrs/models  ────▶ start_model_consumer
+                                                            GossipMsg → known_models++
+
+                                                            geo_fetch_block(cid)
+                                find_providers(cid)  ◀─────
+                                providers = [A, …]  ──────▶ plan_routing(RTT, region)
+                                                            primary = A  (+k-1 hedge)
+                                                            Request{cid}
+   blockfetch /1.0.0 (CBOR)  ◀─────────────────────────────
+     store.get(cid) → bytes
+     Response Block(data)  ───────────────────────────────▶ verify cid==hash(data) ✓
+                                                            backfill → store; return
 ```
 
 **Ключевые свойства:** провайдинг через DHT (`provide`), анонс по gossipsub
