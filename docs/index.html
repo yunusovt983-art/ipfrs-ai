@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPFRS — Inter-Planetary File Rust System</title>
+<meta name="description" content="Распределённая контент-адресуемая файловая система на Rust, объединяющая хранение с ML-интеллектом: P2P, семантический поиск, нейро-символический вывод и гео-распределённое исполнение графов.">
+<meta property="og:title" content="IPFRS — Inter-Planetary File Rust System">
+<meta property="og:description" content="Контент-адресуемая P2P-файловая система с семантическим поиском и гео-распределённым выводом. 705K строк Rust, 12 крейтов, DDD.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/ipfrs-banner.jpg">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%2335d0ba' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%2335d0ba'/%3E%3Ccircle cx='16' cy='3' r='2.4' fill='%236ea8fe'/%3E%3Ccircle cx='27' cy='22' r='2.4' fill='%23a78bfa'/%3E%3Ccircle cx='5' cy='22' r='2.4' fill='%236ea8fe'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0a0e14; --bg2:#111722; --bg3:#161d2b; --border:#242c3d;
+    --text:#e6edf3; --muted:#8b98a9; --faint:#5c6b7f;
+    --accent:#35d0ba; --accent2:#6ea8fe; --accent3:#a78bfa;
+    --radius:14px; --maxw:1120px;
+    --grad:linear-gradient(120deg,#35d0ba 0%,#6ea8fe 55%,#a78bfa 100%);
+  }
+  :root[data-theme="light"]{
+    --bg:#f6f8fb; --bg2:#ffffff; --bg3:#eef2f7; --border:#dde4ec;
+    --text:#0d1520; --muted:#556072; --faint:#8896a8;
+    --accent:#0ea896; --accent2:#2f6bd8; --accent3:#7c3aed;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth; scroll-padding-top:72px}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Helvetica,Arial,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  code,.mono{font-family:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent2); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
+  section{padding:76px 0; border-top:1px solid var(--border)}
+  h2{font-size:clamp(1.5rem,3vw,2.1rem); margin:0 0 6px; letter-spacing:-.02em}
+  .sub{color:var(--muted); margin:0 0 34px; max-width:60ch}
+  .eyebrow{color:var(--accent); font-weight:700; font-size:.78rem; letter-spacing:.14em; text-transform:uppercase; margin-bottom:10px}
+
+  /* NAV */
+  header.nav{position:sticky; top:0; z-index:50; backdrop-filter:blur(12px);
+    background:color-mix(in srgb,var(--bg) 82%,transparent); border-bottom:1px solid var(--border)}
+  .nav .wrap{display:flex; align-items:center; gap:20px; height:60px}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:-.02em; color:var(--text)}
+  .brand svg{width:26px; height:26px}
+  .brand:hover{text-decoration:none}
+  nav.links{margin-left:auto; display:flex; gap:22px; align-items:center}
+  nav.links a{color:var(--muted); font-size:.92rem; font-weight:500}
+  nav.links a:hover,nav.links a.active{color:var(--text); text-decoration:none}
+  .ghbtn{border:1px solid var(--border); padding:7px 14px; border-radius:10px; color:var(--text)!important; font-weight:600}
+  .ghbtn:hover{border-color:var(--accent); text-decoration:none}
+  .themebtn{background:none; border:1px solid var(--border); color:var(--text); width:36px; height:34px; border-radius:10px; cursor:pointer; font-size:1rem}
+  .themebtn:hover{border-color:var(--accent)}
+  .menutoggle{display:none}
+
+  /* HERO */
+  .hero{position:relative; overflow:hidden; border-top:none; padding:70px 0 60px}
+  .hero::before{content:""; position:absolute; inset:0; background:
+    radial-gradient(60% 60% at 20% 0%,color-mix(in srgb,var(--accent) 16%,transparent),transparent 70%),
+    radial-gradient(50% 50% at 90% 20%,color-mix(in srgb,var(--accent3) 14%,transparent),transparent 70%);
+    pointer-events:none}
+  .hero .wrap{position:relative}
+  .banner{width:100%; border-radius:var(--radius); border:1px solid var(--border); display:block; margin-bottom:34px; box-shadow:0 20px 60px -30px rgba(0,0,0,.7)}
+  .h1{font-size:clamp(2.1rem,5.2vw,3.5rem); line-height:1.06; letter-spacing:-.03em; margin:0 0 16px; font-weight:820}
+  .h1 .grad{background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent}
+  .lead{font-size:clamp(1.05rem,2vw,1.28rem); color:var(--muted); max-width:64ch; margin:0 0 26px}
+  .chips{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:28px}
+  .chip{background:var(--bg2); border:1px solid var(--border); border-radius:999px; padding:7px 15px; font-size:.85rem; color:var(--muted)}
+  .chip b{color:var(--text)}
+  .cta{display:flex; flex-wrap:wrap; gap:12px}
+  .btn{display:inline-flex; align-items:center; gap:9px; padding:12px 20px; border-radius:12px; font-weight:650; font-size:.96rem; cursor:pointer; border:1px solid transparent}
+  .btn.primary{background:var(--grad); color:#04121a}
+  .btn.primary:hover{text-decoration:none; filter:brightness(1.06)}
+  .btn.ghost{background:var(--bg2); border-color:var(--border); color:var(--text)}
+  .btn.ghost:hover{text-decoration:none; border-color:var(--accent)}
+
+  /* METRICS */
+  .metrics{display:grid; grid-template-columns:repeat(6,1fr); gap:14px}
+  .metric{background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px 18px; text-align:center}
+  .metric .num{font-size:clamp(1.4rem,2.5vw,2rem); font-weight:800; letter-spacing:-.02em; background:var(--grad); -webkit-background-clip:text; background-clip:text; color:transparent}
+  .metric .lbl{color:var(--muted); font-size:.8rem; margin-top:4px}
+
+  /* CARDS GRID */
+  .grid{display:grid; gap:18px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:24px; transition:border-color .2s, transform .2s}
+  .card:hover{border-color:color-mix(in srgb,var(--accent) 55%,var(--border)); transform:translateY(-3px)}
+  .card .ic{font-size:1.6rem}
+  .card h3{margin:12px 0 6px; font-size:1.15rem; letter-spacing:-.01em}
+  .card h3 .tag{font-size:.72rem; color:var(--accent); font-weight:700; letter-spacing:.08em; margin-left:6px}
+  .card p{margin:0 0 12px; color:var(--muted); font-size:.94rem}
+  .card .loc{font-size:.8rem; color:var(--faint); font-family:inherit}
+  .card ul{margin:8px 0 0; padding-left:18px; color:var(--muted); font-size:.9rem}
+  .card ul li{margin:3px 0}
+
+  /* FEATURE (distributed) */
+  .feat{display:grid; grid-template-columns:1.05fr 1fr; gap:34px; align-items:start}
+  .feat .list{display:grid; gap:14px}
+  .feat .row{display:flex; gap:14px; background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:16px 18px}
+  .feat .row .k{font-family:inherit}
+  .feat .row .dot{flex:0 0 auto; width:11px; height:11px; border-radius:50%; background:var(--grad); margin-top:7px}
+  .feat .row b{display:block; margin-bottom:2px}
+  .feat .row span{color:var(--muted); font-size:.92rem}
+  .panel{background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px; position:sticky; top:80px}
+  .panel h4{margin:0 0 12px; font-size:.85rem; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+  pre.ansi{margin:0; font-family:"SF Mono",ui-monospace,monospace; font-size:.72rem; line-height:1.35; color:var(--text); overflow-x:auto; white-space:pre}
+  pre.ansi .a{color:var(--accent)} pre.ansi .b{color:var(--accent2)} pre.ansi .c{color:var(--accent3)} pre.ansi .m{color:var(--faint)}
+
+  /* TABLE */
+  .tablewrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius)}
+  table{width:100%; border-collapse:collapse; font-size:.92rem; min-width:520px}
+  th,td{text-align:left; padding:12px 16px; border-bottom:1px solid var(--border)}
+  thead th{background:var(--bg3); color:var(--muted); font-weight:600; font-size:.78rem; letter-spacing:.05em; text-transform:uppercase}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--bg3)}
+  td.name{font-weight:600}
+  td.num{text-align:right; font-variant-numeric:tabular-nums; color:var(--muted)}
+  .bar{position:relative; height:8px; background:var(--bg3); border-radius:999px; overflow:hidden; min-width:90px}
+  .bar>i{position:absolute; left:0; top:0; bottom:0; background:var(--grad); border-radius:999px}
+
+  /* STACK */
+  .stack{display:grid; grid-template-columns:repeat(3,1fr); gap:12px}
+  .stack .item{background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:14px 16px}
+  .stack .item .k{color:var(--faint); font-size:.75rem; text-transform:uppercase; letter-spacing:.06em}
+  .stack .item .v{font-weight:600; margin-top:3px}
+
+  /* ROADMAP */
+  .road{display:flex; flex-wrap:wrap; gap:12px}
+  .spike{background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; flex:1 1 200px; min-width:190px}
+  .spike .st{font-size:.72rem; font-weight:700; letter-spacing:.06em}
+  .spike.done{border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
+  .spike.done .st{color:var(--accent)}
+  .spike.next .st{color:var(--accent3)}
+  .spike b{display:block; margin:6px 0 2px}
+  .spike span{color:var(--muted); font-size:.88rem}
+
+  .note{background:var(--bg2); border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:12px; padding:18px 22px; color:var(--muted); font-size:.94rem}
+  .note b{color:var(--text)}
+
+  footer{border-top:1px solid var(--border); padding:40px 0; color:var(--muted); font-size:.9rem}
+  footer .wrap{display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between}
+  footer a{color:var(--text)}
+
+  @media(max-width:900px){
+    .metrics{grid-template-columns:repeat(3,1fr)}
+    .g3{grid-template-columns:repeat(2,1fr)}
+    .feat{grid-template-columns:1fr}
+    .panel{position:static}
+    .stack{grid-template-columns:repeat(2,1fr)}
+  }
+  @media(max-width:620px){
+    nav.links{display:none}
+    nav.links.open{display:flex; position:absolute; top:60px; left:0; right:0; flex-direction:column; gap:0; background:var(--bg2); border-bottom:1px solid var(--border); padding:8px 22px}
+    nav.links.open a{padding:11px 0; border-bottom:1px solid var(--border)}
+    .menutoggle{display:inline-flex; margin-left:auto}
+    .metrics,.g3,.g2{grid-template-columns:1fr 1fr}
+    .stack{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" stroke="var(--accent)" stroke-width="2"/><circle cx="16" cy="16" r="4" fill="var(--accent)"/><circle cx="16" cy="3" r="2.4" fill="var(--accent2)"/><circle cx="27" cy="22" r="2.4" fill="var(--accent3)"/><circle cx="5" cy="22" r="2.4" fill="var(--accent2)"/></svg>
+      IPFRS
+    </a>
+    <button class="themebtn menutoggle" id="menuBtn" aria-label="Меню">☰</button>
+    <nav class="links" id="links">
+      <a href="#overview">Обзор</a>
+      <a href="#contexts">Контексты</a>
+      <a href="#inference">Инференс</a>
+      <a href="#architecture">Крейты</a>
+      <a href="#stack">Стек</a>
+      <a href="#roadmap">Roadmap</a>
+      <button class="themebtn" id="themeBtn" aria-label="Тема">◐</button>
+      <a class="ghbtn" href="https://github.com/yunusovt983-art/ipfrs-ai" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<a id="top"></a>
+<section class="hero">
+  <div class="wrap">
+    <img class="banner" src="assets/ipfrs-banner.jpg" alt="IPFRS — Planetary-Scale Distributed Brain for AI">
+    <div class="eyebrow">Inter-Planetary File Rust System</div>
+    <h1 class="h1">Контент-адресуемая P2P-система<br>с <span class="grad">ML-интеллектом</span></h1>
+    <p class="lead">Распределённая файловая система на Rust, где каждый блок — сам себе адрес (CID = hash данных). Поверх классического IPFS добавлены семантический поиск, нейро-символический вывод и гео-распределённое исполнение графов между пирами.</p>
+    <div class="chips">
+      <span class="chip"><b>705 333</b> строк Rust</span>
+      <span class="chip"><b>12</b> крейтов · DDD</span>
+      <span class="chip"><b>5</b> bounded contexts</span>
+      <span class="chip"><b>741</b> тестовый файл</span>
+      <span class="chip">Лицензия <b>AGPL-3.0</b></span>
+    </div>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/yunusovt983-art/ipfrs-ai" target="_blank" rel="noopener">Открыть на GitHub</a>
+      <a class="btn ghost" href="#inference">Гео-распределённый вывод →</a>
+    </div>
+  </div>
+</section>
+
+<section id="overview">
+  <div class="wrap">
+    <div class="eyebrow">Обзор</div>
+    <h2>Масштаб проекта</h2>
+    <p class="sub">Чистый Rust, без C/Fortran-зависимостей. Цифры выверены по рабочему дереву репозитория.</p>
+    <div class="metrics">
+      <div class="metric"><div class="num">705K</div><div class="lbl">строк Rust</div></div>
+      <div class="metric"><div class="num">1 026</div><div class="lbl">файлов</div></div>
+      <div class="metric"><div class="num">12</div><div class="lbl">крейтов</div></div>
+      <div class="metric"><div class="num">741</div><div class="lbl">файлов с тестами</div></div>
+      <div class="metric"><div class="num">~193</div><div class="lbl">зависимостей</div></div>
+      <div class="metric"><div class="num">100%</div><div class="lbl">Rust · memory-safe</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="contexts">
+  <div class="wrap">
+    <div class="eyebrow">Domain-Driven Design</div>
+    <h2>Пять bounded contexts</h2>
+    <p class="sub">Каждый домен говорит на своём Ubiquitous Language, масштабируется независимо и сходится к единому токену границы — <code>CID</code> (общий Shared Kernel <code>ipfrs-core</code>).</p>
+    <div class="grid g3">
+      <div class="card">
+        <div class="ic">💾</div>
+        <h3>Storage</h3>
+        <p>Контент-адресуемое хранилище блоков поверх Sled B+tree с WAL и ACID.</p>
+        <ul><li>Декораторы: Bloom → Cache → Sled</li><li>GC, пины, тиринг</li><li>Zero-copy I/O (Apache Arrow)</li></ul>
+        <p class="loc">165 файлов · 135 684 строк</p>
+      </div>
+      <div class="card">
+        <div class="ic">🌐</div>
+        <h3>Network</h3>
+        <p>P2P-слой на libp2p: обнаружение пиров, маршрутизация, устойчивость.</p>
+        <ul><li>Kademlia DHT · Gossipsub · mDNS</li><li>QUIC / TCP · обход NAT (DCUtR)</li><li>Репутация · circuit breaker</li></ul>
+        <p class="loc">230 файлов · 157 910 строк</p>
+      </div>
+      <div class="card">
+        <div class="ic">🔍</div>
+        <h3>Semantic</h3>
+        <p>Поиск по смыслу: векторные эмбеддинги и приближённый k-NN.</p>
+        <ul><li>HNSW + DiskANN (Vamana)</li><li>RRF-фьюжн результатов пиров</li><li>Семантический DHT · роутинг</li></ul>
+        <p class="loc">169 файлов · 142 392 строк</p>
+      </div>
+      <div class="card">
+        <div class="ic">🤖</div>
+        <h3>TensorLogic <span class="tag">CORE</span></h3>
+        <p>Нейро-символика: логика-как-тензор, вывод и обучение.</p>
+        <ul><li>20+ движков рассуждения + autograd</li><li>Федеративное обучение (FedAvg)</li><li>CID-адресуемые правила, proof-carrying</li></ul>
+        <p class="loc">227 файлов · 160 207 строк</p>
+      </div>
+      <div class="card">
+        <div class="ic">📡</div>
+        <h3>Transport</h3>
+        <p>Обмен блоками между пирами с приоритезацией.</p>
+        <ul><li>Bitswap · Session · WantList</li><li>TensorSwap (стриминг тензоров)</li><li>Приоритетные want-list'ы</li></ul>
+        <p class="loc">61 файл · 34 299 строк</p>
+      </div>
+      <div class="card">
+        <div class="ic">⚙️</div>
+        <h3>Shared Kernel</h3>
+        <p><code>ipfrs-core</code> — фундамент, на котором сходятся все контексты.</p>
+        <ul><li>Cid · Block · Ipld · Merkle-DAG</li><li>Хеши, кодеки, TensorBlock</li><li>Единый тип ошибок</li></ul>
+        <p class="loc">51 файл · 23 949 строк</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="inference">
+  <div class="wrap">
+    <div class="eyebrow">RoadMap · Phase 5</div>
+    <h2>Гео-распределённый вывод</h2>
+    <p class="sub">Свежая веха: вычислительный граф разбивается на стадии и исполняется на разных пирах, а активации стримятся между ними по libp2p. Реализовано через инверсию зависимостей — без цикла <code>network ↔ tensorlogic</code>.</p>
+    <div class="feat">
+      <div class="list">
+        <div class="row"><div class="dot"></div><div><b><code class="k">/ipfrs/activation/1.0.0</code></b><span>libp2p request-response протокол — стриминг активаций между пирами (паттерн, как у block-fetch / semsearch).</span></div></div>
+        <div class="row"><div class="dot"></div><div><b>TlExecutor — сменный бэкенд</b><span>Conformist-трейт: <code>NumExecutor</code> над <code>NumTensor</code>, обобщённый einsum (matmul/matvec/dot/outer/batched) и N-D reduce. Тяжёлый движок можно подставить позже.</span></div></div>
+        <div class="row"><div class="dot"></div><div><b>Планировщик пайплайна</b><span>Авто-разбиение графа на самодостаточные стадии по размещению <code>node→peer</code>, топологический порядок, contiguous-сплит для pipeline-параллелизма.</span></div></div>
+        <div class="row"><div class="dot"></div><div><b>Гео-роутинг</b><span>Выбор пира по измеренному RTT и региону, hedge-запросы (<code>plan_routing</code>), выкачка по <code>/ipfrs/blockfetch/1.0.0</code> с проверкой <code>cid == hash(data)</code>.</span></div></div>
+        <div class="row"><div class="dot"></div><div><b>Численные kernel'ы</b><span>Стабильные f32-ядра: softmax (log-sum-exp), layer-norm, RMS-norm, GELU, SiLU — ACL-порт, считают по-настоящему.</span></div></div>
+      </div>
+      <div class="panel">
+        <h4>DoD — интеграционный тест</h4>
+        <pre class="ansi"><span class="m">2-stage граф · 2 живые libp2p-ноды</span>
+
+  <span class="b">УЗЕЛ A</span> (оркестратор)        <span class="c">УЗЕЛ B</span> (executor)
+  ─────────────────        ─────────────────
+  initial{x,b1,b2}
+     │  stage&nbsp;1 ──────▶ execute_stage
+     │                       h = relu(x+b1)
+     │  ◀────── activation&nbsp;h  <span class="a">(по сети)</span>
+  stage&nbsp;2 (локально)
+  y = h * b2
+     │
+     ▼
+  <span class="a">y == [30, 0]  ✓</span>  (== монолитный граф)</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <div class="eyebrow">Крейты</div>
+    <h2>Строки кода по крейтам</h2>
+    <p class="sub">12 крейтов Cargo-workspace, организованных как DDD context map. Каждый крейт — отдельный поддомен.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Крейт</th><th>Роль</th><th class="num">Файлы</th><th class="num">Строки</th><th>Доля</th></tr></thead>
+        <tbody>
+          <tr><td class="name">ipfrs-tensorlogic</td><td>Нейро-символика · 20+ движков</td><td class="num">227</td><td class="num">160 207</td><td><div class="bar"><i style="width:100%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-network</td><td>libp2p · Kademlia · gossip</td><td class="num">230</td><td class="num">157 910</td><td><div class="bar"><i style="width:98.6%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-semantic</td><td>HNSW · DiskANN · роутинг</td><td class="num">169</td><td class="num">142 392</td><td><div class="bar"><i style="width:88.9%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-storage</td><td>Sled · WAL · GC · декораторы</td><td class="num">165</td><td class="num">135 684</td><td><div class="bar"><i style="width:84.7%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-transport</td><td>Bitswap · Session · QUIC</td><td class="num">61</td><td class="num">34 299</td><td><div class="bar"><i style="width:21.4%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-core</td><td>Shared Kernel · Cid · Ipld</td><td class="num">51</td><td class="num">23 949</td><td><div class="bar"><i style="width:14.9%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-interface</td><td>Шлюз · gRPC · GraphQL · WS</td><td class="num">29</td><td class="num">17 621</td><td><div class="bar"><i style="width:11.0%"></i></div></td></tr>
+          <tr><td class="name">ipfrs</td><td>Узел / оркестратор (Facade)</td><td class="num">50</td><td class="num">16 074</td><td><div class="bar"><i style="width:10.0%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-cli</td><td>CLI · clap · ratatui</td><td class="num">36</td><td class="num">12 821</td><td><div class="bar"><i style="width:8.0%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-wasm</td><td>WebAssembly bindings</td><td class="num">5</td><td class="num">2 726</td><td><div class="bar"><i style="width:1.7%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-nodejs</td><td>Node.js FFI · napi-rs</td><td class="num">2</td><td class="num">1 060</td><td><div class="bar"><i style="width:0.7%"></i></div></td></tr>
+          <tr><td class="name">ipfrs-python</td><td>Python FFI · PyO3</td><td class="num">1</td><td class="num">590</td><td><div class="bar"><i style="width:0.4%"></i></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="stack">
+  <div class="wrap">
+    <div class="eyebrow">Технологии</div>
+    <h2>Стек</h2>
+    <p class="sub">Проверенные Rust-компоненты, async-first, zero-copy там, где это важно.</p>
+    <div class="stack">
+      <div class="item"><div class="k">Рантайм</div><div class="v">Tokio (async)</div></div>
+      <div class="item"><div class="k">Хранилище</div><div class="v">Sled · B+tree · WAL</div></div>
+      <div class="item"><div class="k">Сеть</div><div class="v">libp2p · QUIC · Kademlia</div></div>
+      <div class="item"><div class="k">Векторный индекс</div><div class="v">hnsw_rs + DiskANN</div></div>
+      <div class="item"><div class="k">Вывод</div><div class="v">Datalog + 20+ движков</div></div>
+      <div class="item"><div class="k">Сериализация</div><div class="v">DAG-CBOR · Arrow · SafeTensors</div></div>
+      <div class="item"><div class="k">API</div><div class="v">tonic (gRPC) · async-graphql</div></div>
+      <div class="item"><div class="k">TLS</div><div class="v">rustls</div></div>
+      <div class="item"><div class="k">Биндинги</div><div class="v">PyO3 · napi-rs · wasm-bindgen</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="wrap">
+    <div class="eyebrow">Прогресс</div>
+    <h2>Спайки Phase 5</h2>
+    <p class="sub">Разблокировка гео-распределённого вывода велась итеративными спайками. Все — на <code>main</code>, зелёные тесты, чистый clippy.</p>
+    <div class="road">
+      <div class="spike done"><div class="st">✓ ГОТОВО</div><b>Spike 1</b><span>RRF-фьюжн + per-peer circuit breaker (проводка существующих примитивов).</span></div>
+      <div class="spike done"><div class="st">✓ ГОТОВО</div><b>Spike 2 / 2b</b><span>ACL-порт партиционирования + libp2p-протокол активаций; 2-нодовый DoD.</span></div>
+      <div class="spike done"><div class="st">✓ ГОТОВО</div><b>Spike 2c</b><span>Авто-планировщик пайплайна из размещения node→peer.</span></div>
+      <div class="spike done"><div class="st">✓ ГОТОВО</div><b>Spike 3</b><span>Conformist-движок TlExecutor + numeric-kernel'ы из oxigaf.</span></div>
+      <div class="spike done"><div class="st">✓ ГОТОВО</div><b>Spike 3b</b><span>Обобщённый einsum/reduce; numeric_exec через TlExecutor.</span></div>
+      <div class="spike next"><div class="st">→ СЛЕДУЮЩЕЕ</div><b>Среднесрочное</b><span>SMT-судья → proof-carrying · Krum → FedAvg · трекинг градиентов.</span></div>
+    </div>
+    <div style="height:26px"></div>
+    <div class="note"><b>Код — единственный источник истины.</b> Документация выверена по <code>ipfrs_source/crates/**</code>: спроектированная модель честно отделена от реализации, заглушки помечены (⚠️ swarm-fetch, TLS-генератор, GraphSync/erasure). Полный реестр — в <a href="https://github.com/yunusovt983-art/ipfrs-ai/blob/main/Wiki/11-RealityCheck.md" target="_blank" rel="noopener">Wiki/11-RealityCheck</a>.</div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <strong>IPFRS</strong> — Inter-Planetary File Rust System · AGPL-3.0<br>
+      Форк <a href="https://github.com/cool-japan/ipfrs" target="_blank" rel="noopener">cool-japan/ipfrs</a> (Apache-2.0) · обновлено: июль 2026
+    </div>
+    <div>
+      <a href="https://github.com/yunusovt983-art/ipfrs-ai" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // theme toggle (persisted)
+  const root=document.documentElement, tBtn=document.getElementById('themeBtn');
+  const saved=localStorage.getItem('ipfrs-theme'); if(saved) root.setAttribute('data-theme',saved);
+  tBtn.addEventListener('click',()=>{
+    const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
+    root.setAttribute('data-theme',next); localStorage.setItem('ipfrs-theme',next);
+  });
+  // mobile menu
+  const menuBtn=document.getElementById('menuBtn'), links=document.getElementById('links');
+  menuBtn.addEventListener('click',()=>links.classList.toggle('open'));
+  links.addEventListener('click',e=>{ if(e.target.tagName==='A') links.classList.remove('open'); });
+  // scroll-spy
+  const secs=[...document.querySelectorAll('section[id]')];
+  const navA=[...document.querySelectorAll('nav.links a[href^="#"]')];
+  const io=new IntersectionObserver(es=>{
+    es.forEach(en=>{ if(en.isIntersecting){
+      navA.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+en.target.id));
+    }});
+  },{rootMargin:'-45% 0px -50% 0px'});
+  secs.forEach(s=>io.observe(s));
+</script>
+</body>
+</html>

@@ -9,6 +9,7 @@
 .idea/
 *.iml
 .cursor/
+.claude/
 
 # Project-specific
 .obsidian/
