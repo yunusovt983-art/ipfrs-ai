@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { ConnMode, S3Object } from "../types";
 import type { IpfrsClient } from "../lib/ipfrs";
-import { blobCache } from "../lib/buckets";
-import { fileCategory, humanSize, isImage, relTime } from "../lib/format";
+import { fileCategory, humanSize, relTime } from "../lib/format";
+import { PreviewPane } from "./PreviewPane";
 import {
-  IconClose,
   IconCopy,
+  IconClose,
+  IconData,
   IconDownload,
   IconLink,
   IconTrash,
@@ -21,6 +22,7 @@ interface Props {
   onCopy: (cid: string) => void;
   onShare: (o: S3Object) => void;
   onRestore: (key: string, versionCid: string) => void;
+  onInspect: (o: S3Object) => void;
   onDelete: (key: string) => void;
 }
 
@@ -34,31 +36,11 @@ export function DetailsDrawer({
   onCopy,
   onShare,
   onRestore,
+  onInspect,
   onDelete,
 }: Props) {
   const name = object.key.split("/").pop() || object.key;
   const cat = fileCategory(name, object.contentType);
-  const showImg = isImage(object.contentType);
-
-  // Preview URL: in-memory blob (demo/uploaded) or gateway path (live).
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!showImg) {
-      setImgUrl(null);
-      return;
-    }
-    const blob = blobCache.get(object.cid);
-    if (blob) {
-      const url = URL.createObjectURL(blob);
-      setImgUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-    if (mode === "live" && object.cid) {
-      setImgUrl(client.ipfsUrl(object.cid));
-    } else {
-      setImgUrl(null);
-    }
-  }, [object.cid, showImg, mode, client]);
 
   const rows: [string, ReactNode][] = useMemo(
     () => [
@@ -77,7 +59,6 @@ export function DetailsDrawer({
       ["Размер", humanSize(object.size)],
       ["Content-Type", <span className="mono">{object.contentType}</span>],
       ["Изменён", new Date(object.lastModified).toLocaleString("ru-RU")],
-      ["Изменён (отн.)", relTime(object.lastModified)],
       ["Класс хранения", "IPFS (content-addressed)"],
       ["Пин", object.pinned ? "закреплён" : "не закреплён"],
     ],
@@ -94,14 +75,7 @@ export function DetailsDrawer({
         </button>
       </div>
 
-      {showImg &&
-        (imgUrl ? (
-          <div className="preview">
-            <img src={imgUrl} alt={name} />
-          </div>
-        ) : (
-          <div className="preview placeholder">превью недоступно в демо</div>
-        ))}
+      <PreviewPane object={object} mode={mode} client={client} />
 
       <div className="drawer-meta">
         {rows.map(([k, v]) => (
@@ -152,6 +126,9 @@ export function DetailsDrawer({
         </button>
         <button className="btn ghost" onClick={() => onShare(object)} disabled={!object.cid}>
           <IconLink size={16} /> Поделиться
+        </button>
+        <button className="btn ghost" onClick={() => onInspect(object)}>
+          <IconData size={16} /> Блок
         </button>
         <button className="btn ghost" onClick={() => onCopy(object.cid)} disabled={!object.cid}>
           <IconCopy size={16} /> CID

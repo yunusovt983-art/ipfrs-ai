@@ -94,6 +94,22 @@ export class IpfrsClient {
     return this.url(`/ipfs/${cid}`);
   }
 
+  /** Fetch a raw block by CID via /api/v0/dag/get (returns decoded bytes). */
+  async dagGet(cid: string): Promise<Uint8Array> {
+    const res = await fetch(this.url("/api/v0/dag/get"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ arg: cid }),
+    });
+    if (!res.ok) throw new Error(`dag/get: HTTP ${res.status}`);
+    const j = await res.json();
+    const b64 = (j.Data as string) ?? "";
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
   async pin(cid: string): Promise<void> {
     // Best-effort; the gateway may not expose pin/add — ignore failures.
     await fetch(this.url(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`), {

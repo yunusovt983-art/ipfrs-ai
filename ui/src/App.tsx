@@ -21,10 +21,13 @@ import {
 } from "./lib/buckets";
 import { demoCid, IpfrsClient } from "./lib/ipfrs";
 import { guessType } from "./lib/format";
+import { smartSearch, type Ranked } from "./lib/search";
 import { Sidebar } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { ObjectList } from "./components/ObjectList";
+import { SmartResults } from "./components/SmartResults";
 import { DetailsDrawer } from "./components/DetailsDrawer";
+import { BlockInspector } from "./components/BlockInspector";
 import { SettingsModal } from "./components/SettingsModal";
 import { Toasts } from "./components/Toasts";
 import { UploadOverlay } from "./components/UploadOverlay";
@@ -63,6 +66,9 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [smart, setSmart] = useState(false);
+  const [ranked, setRanked] = useState<Ranked[]>([]);
+  const [inspect, setInspect] = useState<S3Object | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const toastId = useRef(0);
 
@@ -427,6 +433,21 @@ export function App() {
   );
   const stats = useMemo(() => bucketStats(objects.filter((o) => !o.key.endsWith("/.keep"))), [objects]);
 
+  // Smart-search ranking (async: reads cached text content).
+  useEffect(() => {
+    let alive = true;
+    if (smart && query.trim()) {
+      smartSearch(query, objects).then((r) => {
+        if (alive) setRanked(r);
+      });
+    } else {
+      setRanked([]);
+    }
+    return () => {
+      alive = false;
+    };
+  }, [smart, query, objects]);
+
   // ---- drag & drop ------------------------------------------------------
   const onDrop = useCallback(
     (e: DragEvent) => {
@@ -470,6 +491,7 @@ export function App() {
               prefix={prefix}
               query={query}
               view={view}
+              smart={smart}
               stats={stats}
               onNavigate={(p) => {
                 setPrefix(p);
@@ -478,11 +500,20 @@ export function App() {
                 clearSelection();
               }}
               onQuery={setQuery}
+              onSmart={setSmart}
               onUpload={() => fileInput.current?.click()}
               onNewFolder={createFolder}
               onRefresh={refresh}
               onView={setView}
             />
+            {smart && query.trim() ? (
+              <SmartResults
+                query={query}
+                results={ranked}
+                onOpen={(k) => setSelectedKey(k)}
+                onDownload={download}
+              />
+            ) : (
             <ObjectList
               entries={entries}
               view={view}
@@ -506,6 +537,7 @@ export function App() {
               onShare={shareLink}
               onUpload={() => fileInput.current?.click()}
             />
+            )}
           </>
         ) : (
           <div className="empty-state big">
@@ -525,7 +557,18 @@ export function App() {
           onCopy={copyCid}
           onShare={shareLink}
           onRestore={restoreVersion}
+          onInspect={(o) => setInspect(o)}
           onDelete={deleteObject}
+        />
+      )}
+
+      {inspect && (
+        <BlockInspector
+          object={inspect}
+          mode={settings.mode}
+          client={client}
+          onClose={() => setInspect(null)}
+          onCopy={copyCid}
         />
       )}
 

@@ -13,9 +13,11 @@ interface Props {
   prefix: string;
   query: string;
   view: "list" | "grid";
+  smart: boolean;
   stats: { count: number; size: number };
   onNavigate: (prefix: string) => void;
   onQuery: (q: string) => void;
+  onSmart: (v: boolean) => void;
   onUpload: () => void;
   onNewFolder: (name: string) => void;
   onRefresh: () => void;
@@ -27,9 +29,11 @@ export function Toolbar({
   prefix,
   query,
   view,
+  smart,
   stats,
   onNavigate,
   onQuery,
+  onSmart,
   onUpload,
   onNewFolder,
   onRefresh,
@@ -72,13 +76,20 @@ export function Toolbar({
       </div>
 
       <div className="tools">
-        <div className="search">
+        <div className={"search" + (smart ? " smart" : "")}>
           <IconSearch size={16} />
           <input
-            placeholder="Поиск объектов…"
+            placeholder={smart ? "Умный поиск по содержимому…" : "Поиск объектов…"}
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
+          <button
+            className={"smart-toggle" + (smart ? " on" : "")}
+            title="Умный поиск (по содержимому и метаданным)"
+            onClick={() => onSmart(!smart)}
+          >
+            ✦ Умный
+          </button>
         </div>
 
         {newFolder ? (
