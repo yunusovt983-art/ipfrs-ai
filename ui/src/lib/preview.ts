@@ -103,6 +103,35 @@ export function looksBinary(bytes: Uint8Array): boolean {
   return ctrl / Math.max(n, 1) > 0.15;
 }
 
+/** A generated placeholder "thumbnail" (data-URI SVG) for demo image objects
+ * that have no real bytes — deterministic hue from the filename. */
+export function demoImagePlaceholder(name: string): string {
+  const ext = (name.split(".").pop() || "IMG").toUpperCase().slice(0, 5);
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  const h2 = (h + 55) % 360;
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 250'>` +
+    `<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>` +
+    `<stop offset='0' stop-color='hsl(${h},65%,52%)'/>` +
+    `<stop offset='1' stop-color='hsl(${h2},68%,42%)'/></linearGradient></defs>` +
+    `<rect width='400' height='250' fill='url(#g)'/>` +
+    `<g fill='none' stroke='rgba(255,255,255,.85)' stroke-width='7' stroke-linejoin='round' stroke-linecap='round'>` +
+    `<rect x='150' y='95' width='100' height='75' rx='8'/>` +
+    `<circle cx='176' cy='120' r='9'/>` +
+    `<path d='M156 165l24-22 14 12 20-18 26 24'/></g>` +
+    `<text x='200' y='205' fill='rgba(255,255,255,.95)' font-family='sans-serif' font-size='19' font-weight='700' text-anchor='middle'>${escapeXml(name)}</text>` +
+    `<text x='200' y='228' fill='rgba(255,255,255,.7)' font-family='sans-serif' font-size='12' text-anchor='middle'>демо-превью · ${ext}</text>` +
+    `</svg>`;
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/[<>&'"]/g, (c) =>
+    ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c] as string,
+  );
+}
+
 export function humanCount(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";

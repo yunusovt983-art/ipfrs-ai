@@ -5,6 +5,7 @@ import { blobCache } from "../lib/buckets";
 import { isImage } from "../lib/format";
 import {
   decodeText,
+  demoImagePlaceholder,
   fetchBytes,
   humanCount,
   looksBinary,
@@ -85,12 +86,11 @@ export function PreviewPane({
   if (st.loading) return <div className="preview placeholder">загрузка превью…</div>;
 
   if (img) {
-    return st.imgUrl ? (
+    return (
       <div className="preview">
-        <img src={st.imgUrl} alt={name} />
+        <img src={st.imgUrl ?? demoImagePlaceholder(name)} alt={name} />
+        {!st.imgUrl && <div className="preview-tag">демо-превью</div>}
       </div>
-    ) : (
-      <div className="preview placeholder">превью изображения недоступно в демо</div>
     );
   }
 
