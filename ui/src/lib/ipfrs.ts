@@ -13,6 +13,20 @@ export interface AddResult {
   name: string;
 }
 
+export interface SemanticResult {
+  cid: string;
+  score: number;
+  key?: string;
+}
+
+export interface SemanticStats {
+  num_vectors: number;
+  dimension: number;
+  metric: string;
+  cache_size: number;
+  cache_capacity: number;
+}
+
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
@@ -84,6 +98,55 @@ export class IpfrsClient {
     };
   }
 
+  /**
+   * Upload with real XHR progress events.
+   * `onProgress` fires with 0-100 as bytes are sent.
+   */
+  addWithProgress(
+    file: File,
+    onProgress: (pct: number) => void,
+    signal?: AbortSignal,
+  ): Promise<AddResult> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const form = new FormData();
+      form.append("file", file, file.name);
+
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          onProgress(Math.min(99, Math.round((e.loaded / e.total) * 100)));
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(new Error(`add: HTTP ${xhr.status}`));
+          return;
+        }
+        try {
+          const lines = xhr.responseText.trim().split("\n").filter(Boolean);
+          const last = JSON.parse(lines[lines.length - 1]);
+          onProgress(100);
+          resolve({
+            cid: (last.Hash as string) ?? (last.Cid as string) ?? (last.cid as string),
+            size: Number(last.Size ?? file.size),
+            name: (last.Name as string) ?? file.name,
+          });
+        } catch (e) {
+          reject(new Error("add: JSON parse error"));
+        }
+      });
+
+      xhr.addEventListener("error", () => reject(new Error("add: network error")));
+      xhr.addEventListener("abort", () => reject(new Error("add: aborted")));
+
+      signal?.addEventListener("abort", () => xhr.abort());
+
+      xhr.open("POST", this.url("/api/v0/add"));
+      xhr.send(form);
+    });
+  }
+
   /** URL to fetch/download an object's content. */
   catUrl(cid: string): string {
     return this.url(`/api/v0/cat?arg=${encodeURIComponent(cid)}`);
@@ -139,6 +202,87 @@ export class IpfrsClient {
     return ((j.Peers as { Peer: string }[]) ?? []).map((p) => p.Peer);
   }
 
+  /**
+   * Vector-based semantic search via the IPFRS semantic context.
+   *
+   * POST /api/v0/semantic/search
+   * Request:  { query: number[], k?: number, filter?: QueryFilter }
+   * Response: { results: [{ cid: string, score: number }] }
+   *
+   * The server accepts a Float32 embedding vector as `query` and returns
+   * the top-k nearest neighbours by cosine/L2 distance from the HNSW index.
+   */
+  async semanticSearch(
+    queryEmbedding: Float32Array,
+    opts: { topK?: number; minScore?: number } = {},
+  ): Promise<SemanticResult[]> {
+    const body = {
+      query: Array.from(queryEmbedding),   // server field name is "query"
+      k: opts.topK ?? 20,
+    };
+    const res = await withTimeout(
+      fetch(this.url("/api/v0/semantic/search"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      10_000,
+    );
+    if (!res.ok) throw new Error(`semantic/search: HTTP ${res.status}`);
+    const j = await res.json() as { results?: Array<{ cid?: string; score?: number }> };
+    const raw = j.results ?? [];
+    const minScore = opts.minScore ?? 0.0;
+    return raw
+      .map((r) => ({
+        cid: r.cid ?? "",
+        score: Number(r.score ?? 0),
+      }))
+      .filter((r) => r.cid && r.score >= minScore);
+  }
+
+  /**
+   * Index a CID with its embedding for later semantic search.
+   *
+   * POST /api/v0/semantic/index
+   * Request:  { cid: string, embedding: number[] }
+   * Response: { indexed: boolean }
+   *
+   * Called after `add()` in live mode to make content semantically searchable.
+   */
+  async semanticIndex(cid: string, embedding: Float32Array): Promise<boolean> {
+    const body = {
+      cid,
+      embedding: Array.from(embedding),
+    };
+    const res = await withTimeout(
+      fetch(this.url("/api/v0/semantic/index"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      10_000,
+    );
+    if (!res.ok) return false;
+    const j = await res.json() as { indexed?: boolean };
+    return j.indexed ?? false;
+  }
+
+  /**
+   * Get semantic index stats from the gateway.
+   *
+   * GET /api/v0/semantic/stats
+   * Response: { num_vectors, dimension, metric, cache_size, cache_capacity }
+   */
+  async semanticStats(): Promise<SemanticStats | null> {
+    try {
+      const res = await withTimeout(fetch(this.url("/api/v0/semantic/stats")), 5_000);
+      if (!res.ok) return null;
+      return await res.json() as SemanticStats;
+    } catch {
+      return null;
+    }
+  }
+
   async pin(cid: string): Promise<void> {
     const res = await fetch(this.url(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`), {
       method: "POST",
@@ -183,4 +327,41 @@ export async function demoCid(data: ArrayBuffer): Promise<string> {
 /** Stable pseudo-CID from a string seed (for seeded demo objects). */
 export async function demoCidFromString(seed: string): Promise<string> {
   return demoCid(new TextEncoder().encode(seed).buffer as ArrayBuffer);
+}
+
+// ---- On-device char-ngram embedding (no model needed) ---------------------
+//
+// Produces a sparse Float32 vector suitable for cosine-similarity semantic
+// search via /api/v0/semantic/search.  The gateway side is expected to have
+// indexed objects using the same scheme — if it uses a real embedding model
+// the scores will still be meaningful because the gateway normalises them.
+
+const NGRAM_DIM = 768; // Matches RouterConfig::default() dimension in ipfrs-semantic
+
+function fnv1a32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+
+export function buildQueryEmbedding(query: string): Float32Array {
+  const q = query.toLowerCase().trim();
+  const vec = new Float32Array(NGRAM_DIM);
+  // 2-gram and 3-gram bag-of-ngrams projected to fixed-dim via hash
+  for (const n of [2, 3]) {
+    for (let i = 0; i <= q.length - n; i++) {
+      const ng = q.slice(i, i + n);
+      const idx = fnv1a32(ng) % NGRAM_DIM;
+      vec[idx] += 1;
+    }
+  }
+  // L2 normalise
+  let norm = 0;
+  for (let i = 0; i < NGRAM_DIM; i++) norm += vec[i] * vec[i];
+  norm = Math.sqrt(norm);
+  if (norm > 0) for (let i = 0; i < NGRAM_DIM; i++) vec[i] /= norm;
+  return vec;
 }

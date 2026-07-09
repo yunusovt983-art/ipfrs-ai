@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Bucket, ConnMode, ConnStatus, GatewayInfo } from "../types";
 import { listObjects } from "../lib/buckets";
 import { humanSize } from "../lib/format";
@@ -9,6 +9,8 @@ import {
   IconPlus,
   IconTrash,
 } from "./icons";
+
+type SortMode = "name" | "date" | "size";
 
 interface Props {
   buckets: Bucket[];
@@ -31,6 +33,8 @@ const CONN_LABEL: Record<ConnStatus, string> = {
   offline: "офлайн",
 };
 
+const SORT_LABELS: Record<SortMode, string> = { name: "A–Z", date: "Дата", size: "Размер" };
+
 export function Sidebar({
   buckets,
   current,
@@ -46,6 +50,8 @@ export function Sidebar({
 }: Props) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   const submit = () => {
     if (name.trim()) onCreate(name);
@@ -54,6 +60,36 @@ export function Sidebar({
   };
 
   const dotClass = mode === "demo" ? "demo" : conn;
+
+  /** Enrich each bucket with stats, then sort. */
+  const enriched = useMemo(() => {
+    return buckets.map((b) => {
+      const objs = listObjects(b.name).filter((o) => !o.key.endsWith("/.keep"));
+      const size = objs.reduce((s, o) => s + o.size, 0);
+      return { ...b, objCount: objs.length, totalSize: size };
+    });
+  }, [buckets]);
+
+  const sorted = useMemo(() => {
+    const arr = [...enriched];
+    arr.sort((a, b) => {
+      let v = 0;
+      if (sortMode === "name") v = a.name.localeCompare(b.name, "ru");
+      else if (sortMode === "date") v = a.createdAt - b.createdAt;
+      else if (sortMode === "size") v = a.totalSize - b.totalSize;
+      return v * sortDir;
+    });
+    return arr;
+  }, [enriched, sortMode, sortDir]);
+
+  const cycleSort = (mode: SortMode) => {
+    if (sortMode === mode) {
+      setSortDir((d) => (d === 1 ? -1 : 1));
+    } else {
+      setSortMode(mode);
+      setSortDir(1);
+    }
+  };
 
   return (
     <aside className="sidebar">
@@ -67,9 +103,22 @@ export function Sidebar({
 
       <div className="side-head">
         <span>Бакеты</span>
-        <button className="icon-btn" title="Создать бакет" onClick={() => setAdding((v) => !v)}>
-          <IconPlus size={16} />
-        </button>
+        <div className="side-head-actions">
+          {(["name", "date", "size"] as SortMode[]).map((m) => (
+            <button
+              key={m}
+              className={"sort-pill" + (sortMode === m ? " active" : "")}
+              title={`Сортировать по: ${SORT_LABELS[m]}`}
+              onClick={() => cycleSort(m)}
+            >
+              {SORT_LABELS[m]}
+              {sortMode === m && <span className="sort-arrow">{sortDir === 1 ? "↑" : "↓"}</span>}
+            </button>
+          ))}
+          <button className="icon-btn" title="Создать бакет" onClick={() => setAdding((v) => !v)}>
+            <IconPlus size={16} />
+          </button>
+        </div>
       </div>
 
       {adding && (
@@ -94,45 +143,41 @@ export function Sidebar({
       )}
 
       <nav className="bucket-list">
-        {buckets.map((b) => {
-          const objs = listObjects(b.name).filter((o) => !o.key.endsWith("/.keep"));
-          const size = objs.reduce((s, o) => s + o.size, 0);
-          return (
-            <div
-              key={b.name}
-              className={"bucket-item" + (current === b.name ? " active" : "")}
-              onClick={() => onSelect(b.name)}
-            >
-              <IconBucket size={18} />
-              <div className="bucket-meta">
-                <div className="bucket-name">{b.name}</div>
-                <div className="bucket-stat">
-                  {objs.length} объектов · {humanSize(size)}
-                </div>
+        {sorted.map((b) => (
+          <div
+            key={b.name}
+            className={"bucket-item" + (current === b.name ? " active" : "")}
+            onClick={() => onSelect(b.name)}
+          >
+            <IconBucket size={18} />
+            <div className="bucket-meta">
+              <div className="bucket-name">{b.name}</div>
+              <div className="bucket-stat">
+                {b.objCount} объектов · {humanSize(b.totalSize)}
               </div>
-              <button
-                className="icon-btn ghost del"
-                title="Политики бакета"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPolicy(b.name);
-                }}
-              >
-                <IconGear size={14} />
-              </button>
-              <button
-                className="icon-btn ghost del"
-                title="Удалить бакет"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (confirm(`Удалить бакет «${b.name}» и все его объекты?`)) onDelete(b.name);
-                }}
-              >
-                <IconTrash size={15} />
-              </button>
             </div>
-          );
-        })}
+            <button
+              className="icon-btn ghost del"
+              title="Политики бакета"
+              onClick={(e) => {
+                e.stopPropagation();
+                onPolicy(b.name);
+              }}
+            >
+              <IconGear size={14} />
+            </button>
+            <button
+              className="icon-btn ghost del"
+              title="Удалить бакет"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`Удалить бакет «${b.name}» и все его объекты?`)) onDelete(b.name);
+              }}
+            >
+              <IconTrash size={15} />
+            </button>
+          </div>
+        ))}
         {!buckets.length && <div className="side-empty">пока нет бакетов</div>}
       </nav>
 

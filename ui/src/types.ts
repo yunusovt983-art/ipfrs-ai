@@ -86,6 +86,10 @@ export interface UploadItem {
   size: number;
   status: UploadStatus;
   error?: string;
+  /** 0-100, populated while status === "uploading" */
+  progress?: number;
+  /** Original File reference kept for retry after error. */
+  file?: File;
 }
 
 export type ConnMode = "demo" | "live";

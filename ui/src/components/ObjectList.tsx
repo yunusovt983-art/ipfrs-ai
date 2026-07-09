@@ -1,3 +1,4 @@
+import { useMemo, useRef, useState } from "react";
 import type { BrowserEntry, S3Object } from "../types";
 import { fileCategory, humanSize, relTime, shortCid } from "../lib/format";
 import {
@@ -17,6 +18,9 @@ import {
   IconUpload,
 } from "./icons";
 
+type SortKey = "name" | "size" | "mod";
+type SortDir = "asc" | "desc";
+
 interface Props {
   entries: BrowserEntry[];
   view: "list" | "grid";
@@ -34,7 +38,10 @@ interface Props {
   onDelete: (key: string) => void;
   onCopy: (cid: string) => void;
   onShare: (obj: S3Object) => void;
+  onPin: (obj: S3Object) => void;
   onUpload: () => void;
+  /** Rename an object: oldKey → newBasename. Caller does the actual key rewrite. */
+  onRename: (oldKey: string, newBasename: string) => void;
 }
 
 const GLYPH = {
@@ -57,6 +64,74 @@ function Glyph({ name, type, size = 18 }: { name: string; type: string; size?: n
   );
 }
 
+/** Inline rename input for a single row. */
+function RenameInput({
+  initialName,
+  onCommit,
+  onCancel,
+}: {
+  initialName: string;
+  onCommit: (v: string) => void;
+  onCancel: () => void;
+}) {
+  const [val, setVal] = useState(initialName);
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <input
+      ref={inputRef}
+      autoFocus
+      className="rename-input"
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => {
+        const trimmed = val.trim();
+        if (trimmed && trimmed !== initialName) onCommit(trimmed);
+        else onCancel();
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          const trimmed = val.trim();
+          if (trimmed && trimmed !== initialName) onCommit(trimmed);
+          else onCancel();
+        }
+        if (e.key === "Escape") onCancel();
+      }}
+      onClick={(e) => e.stopPropagation()}
+    />
+  );
+}
+
+function SortTh({
+  label,
+  col,
+  active,
+  dir,
+  onClick,
+  className,
+}: {
+  label: string;
+  col: SortKey;
+  active: SortKey;
+  dir: SortDir;
+  onClick: (k: SortKey) => void;
+  className?: string;
+}) {
+  const isActive = col === active;
+  return (
+    <th
+      className={(className ?? "") + " sort-th" + (isActive ? " active" : "")}
+      onClick={() => onClick(col)}
+      title={isActive ? (dir === "asc" ? "По убыванию" : "По возрастанию") : `Сортировать по ${label.toLowerCase()}`}
+    >
+      {label}
+      <span className="sort-arrow">
+        {isActive ? (dir === "asc" ? "↑" : "↓") : "↕"}
+      </span>
+    </th>
+  );
+}
+
 export function ObjectList({
   entries,
   view,
@@ -74,9 +149,41 @@ export function ObjectList({
   onDelete,
   onCopy,
   onShare,
+  onPin,
   onUpload,
+  onRename,
 }: Props) {
-  const objectKeys = entries.filter((e) => e.kind === "object").map((e) => (e as { object: S3Object }).object.key);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [renamingKey, setRenamingKey] = useState<string | null>(null);
+
+  const handleSort = (k: SortKey) => {
+    if (k === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(k);
+      setSortDir("asc");
+    }
+  };
+
+  /** Sort entries: folders always first, then files by chosen column. */
+  const sorted = useMemo(() => {
+    const folders = entries.filter((e) => e.kind === "folder");
+    const files = entries.filter((e) => e.kind === "object");
+
+    const cmp = (a: BrowserEntry, b: BrowserEntry): number => {
+      if (a.kind !== "object" || b.kind !== "object") return 0;
+      let v = 0;
+      if (sortKey === "name") v = a.name.localeCompare(b.name, "ru");
+      else if (sortKey === "size") v = a.object.size - b.object.size;
+      else if (sortKey === "mod") v = a.object.lastModified - b.object.lastModified;
+      return sortDir === "asc" ? v : -v;
+    };
+
+    return [...folders, ...[...files].sort(cmp)];
+  }, [entries, sortKey, sortDir]);
+
+  const objectKeys = sorted.filter((e) => e.kind === "object").map((e) => (e as { object: S3Object }).object.key);
   const allChecked = objectKeys.length > 0 && objectKeys.every((k) => selected.has(k));
   const someChecked = objectKeys.some((k) => selected.has(k));
 
@@ -117,7 +224,7 @@ export function ObjectList({
       <div className="list-body">
         {bulkBar}
         <div className="grid-view">
-          {entries.map((e) =>
+          {sorted.map((e) =>
             e.kind === "folder" ? (
               <button key={"f" + e.prefix} className="grid-card folder" onClick={() => onOpenFolder(e.prefix)}>
                 <span className="glyph cat-folder">
@@ -139,6 +246,13 @@ export function ObjectList({
                   onClick={(ev) => ev.stopPropagation()}
                   onChange={() => onToggle(e.object.key)}
                 />
+                <button
+                  className={"gc-pin" + (e.object.pinned ? " pinned" : "")}
+                  title={e.object.pinned ? "Открепить" : "Закрепить"}
+                  onClick={(ev) => { ev.stopPropagation(); onPin(e.object); }}
+                >
+                  <IconPin size={14} />
+                </button>
                 <Glyph name={e.name} type={e.object.contentType} size={30} />
                 <div className="gc-name" title={e.name}>{e.name}</div>
                 <div className="gc-sub">{humanSize(e.object.size)}</div>
@@ -167,16 +281,16 @@ export function ObjectList({
                   onChange={() => onToggleAll(objectKeys)}
                 />
               </th>
-              <th className="col-name">Имя</th>
+              <SortTh label="Имя" col="name" active={sortKey} dir={sortDir} onClick={handleSort} className="col-name" />
               <th className="col-type">Тип</th>
-              <th className="col-size">Размер</th>
+              <SortTh label="Размер" col="size" active={sortKey} dir={sortDir} onClick={handleSort} className="col-size" />
               <th className="col-cid">CID</th>
-              <th className="col-mod">Изменён</th>
+              <SortTh label="Изменён" col="mod" active={sortKey} dir={sortDir} onClick={handleSort} className="col-mod" />
               <th className="col-act" />
             </tr>
           </thead>
           <tbody>
-            {entries.map((e) =>
+            {sorted.map((e) =>
               e.kind === "folder" ? (
                 <tr key={"f" + e.prefix} className="folder-row" onClick={() => onOpenFolder(e.prefix)}>
                   <td className="col-check" />
@@ -197,13 +311,40 @@ export function ObjectList({
                   key={e.object.key}
                   className={"obj-row" + (selectedKey === e.object.key ? " sel" : "") + (selected.has(e.object.key) ? " checked" : "")}
                   onClick={() => onOpenObject(e.object.key)}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "F2" && selectedKey === e.object.key) {
+                      ev.preventDefault();
+                      setRenamingKey(e.object.key);
+                    }
+                  }}
+                  tabIndex={0}
                 >
                   <td className="col-check" onClick={(ev) => ev.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(e.object.key)} onChange={() => onToggle(e.object.key)} />
                   </td>
                   <td className="col-name">
                     <Glyph name={e.name} type={e.object.contentType} />
-                    <span className="name" title={e.name}>{e.name}</span>
+                    {renamingKey === e.object.key ? (
+                      <RenameInput
+                        initialName={e.name}
+                        onCommit={(v) => {
+                          onRename(e.object.key, v);
+                          setRenamingKey(null);
+                        }}
+                        onCancel={() => setRenamingKey(null)}
+                      />
+                    ) : (
+                      <span
+                        className="name"
+                        title={e.name}
+                        onDoubleClick={(ev) => {
+                          ev.stopPropagation();
+                          setRenamingKey(e.object.key);
+                        }}
+                      >
+                        {e.name}
+                      </span>
+                    )}
                     {e.object.versions?.length ? (
                       <span className="ver-badge" title={`${e.object.versions.length} прежних версий`}>
                         v{e.object.versions.length + 1}
@@ -232,6 +373,16 @@ export function ObjectList({
                   </td>
                   <td className="col-mod muted">{relTime(e.object.lastModified)}</td>
                   <td className="col-act">
+                    <button
+                      className={"icon-btn ghost pin-btn" + (e.object.pinned ? " pinned" : "")}
+                      title={e.object.pinned ? "Открепить" : "Закрепить"}
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        onPin(e.object);
+                      }}
+                    >
+                      <IconPin size={15} />
+                    </button>
                     <button
                       className="icon-btn ghost"
                       title="Поделиться"

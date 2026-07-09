@@ -110,6 +110,10 @@ export function bucketStats(objects: S3Object[]): { count: number; size: number 
 
 // ---- Demo seed ------------------------------------------------------------
 
+/** Bump this when the seed data changes to force a re-seed of localStorage. */
+const SEED_VERSION = "v4";
+const SEED_VER_KEY = "ipfrs.s3.seed.version";
+
 interface Seed {
   key: string;
   size: number;
@@ -138,12 +142,14 @@ const SEEDS: Record<string, Seed[]> = {
   ],
 };
 
-/** Attach illustrative DAG / proof / providers to a few seeded objects. */
+/** Attach illustrative DAG / proof / providers to ALL seeded objects. */
 async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> {
   const cid = (seed: string) => demoCidFromString(`${bucket}/${seed}`);
   const find = (k: string) => objs.find((o) => o.key === k);
 
+  // ── ml-models ──────────────────────────────────────────────────────────────
   if (bucket === "ml-models") {
+    // llama/model.safetensors  — large sharded DAG + providers
     const model = find("llama/model.safetensors");
     if (model) {
       const shard = async (i: number, size: number): Promise<DagNode> => ({
@@ -177,6 +183,23 @@ async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> 
           },
         ],
       };
+      model.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "integrity(model.safetensors)",
+          rule: "integrity(X) :- pinned(X), cid_ok(X).",
+          bindings: { X: "model.safetensors" },
+          sub: [
+            { goal: "pinned(model.safetensors)", rule: "факт в базе знаний" },
+            {
+              goal: "cid_ok(model.safetensors)",
+              rule: "cid_ok(X) :- hash(X) == cid(X).",
+              sub: [{ goal: "hash(model.safetensors) == Qm…", rule: "SHA2-256 совпадает ✓" }],
+            },
+          ],
+        },
+      };
       model.providers = [
         { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 11, role: "origin" },
         { peer: "12D3KooW…Bob", region: "us-east", rttMs: 74 },
@@ -184,11 +207,150 @@ async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> 
         { peer: "12D3KooW…Dave", region: "eu-west", rttMs: 29 },
       ];
     }
+
+    // llama/config.json — small single-block DAG + proof
+    const cfg = find("llama/config.json");
+    if (cfg) {
+      cfg.dag = {
+        cid: cfg.cid,
+        name: "config.json",
+        size: cfg.size,
+        codec: "dag-json",
+        links: [],
+      };
+      cfg.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "valid_config(config.json)",
+          rule: "valid_config(X) :- schema_ok(X), source(X).",
+          bindings: { X: "config.json" },
+          sub: [
+            { goal: "schema_ok(config.json)", rule: "JSON schema v7 ✓" },
+            { goal: "source(config.json)", rule: "derived_from(model.safetensors) ✓" },
+          ],
+        },
+      };
+      cfg.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 11, role: "origin" },
+        { peer: "12D3KooW…Eve", region: "us-west", rttMs: 88 },
+      ];
+    }
+
+    // llama/tokenizer.json
+    const tok = find("llama/tokenizer.json");
+    if (tok) {
+      tok.dag = {
+        cid: tok.cid,
+        name: "tokenizer.json",
+        size: tok.size,
+        codec: "dag-json",
+        links: [
+          { cid: await cid("vocab-chunk"), name: "vocab.bin", size: 1_400_000, codec: "raw", links: [] },
+          { cid: await cid("merges-chunk"), name: "merges.txt", size: 442_133, codec: "raw", links: [] },
+        ],
+      };
+      tok.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "tokenizer_valid(tokenizer.json)",
+          rule: "tokenizer_valid(X) :- vocab_ok(X), bpe_ok(X).",
+          bindings: { X: "tokenizer.json" },
+          sub: [
+            { goal: "vocab_ok(tokenizer.json)", rule: "vocab size == 32000 ✓" },
+            { goal: "bpe_ok(tokenizer.json)", rule: "merges count == 31999 ✓" },
+          ],
+        },
+      };
+      tok.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 11, role: "origin" },
+        { peer: "12D3KooW…Frank", region: "eu-west", rttMs: 44 },
+        { peer: "12D3KooW…Grace", region: "sa-east", rttMs: 210 },
+      ];
+    }
+
+    // bert-base/model.safetensors
+    const bert = find("bert-base/model.safetensors");
+    if (bert) {
+      bert.dag = {
+        cid: bert.cid,
+        name: "model.safetensors",
+        size: bert.size,
+        codec: "dag-pb",
+        links: [
+          { cid: await cid("bert-shard-0"), name: "shard-0.bin", size: 219_001_088, codec: "raw", links: [] },
+          { cid: await cid("bert-shard-1"), name: "shard-1.bin", size: 219_001_088, codec: "raw", links: [] },
+        ],
+      };
+      bert.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "integrity(bert-base/model.safetensors)",
+          rule: "integrity(X) :- pinned(X), cid_ok(X).",
+          bindings: { X: "bert-base/model.safetensors" },
+          sub: [
+            { goal: "pinned(bert-base/model.safetensors)", rule: "факт в базе знаний" },
+            { goal: "cid_ok(bert-base/model.safetensors)", rule: "SHA2-256 совпадает ✓" },
+          ],
+        },
+      };
+      bert.providers = [
+        { peer: "12D3KooW…Hank", region: "us-east", rttMs: 52, role: "origin" },
+        { peer: "12D3KooW…Iris", region: "eu-central", rttMs: 31 },
+      ];
+    }
+
+    // bert-base/vocab.txt
+    const vocab = find("bert-base/vocab.txt");
+    if (vocab) {
+      vocab.dag = { cid: vocab.cid, name: "vocab.txt", size: vocab.size, codec: "raw", links: [] };
+      vocab.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "vocab_authentic(vocab.txt)",
+          rule: "vocab_authentic(X) :- hash_ok(X), known_source(X).",
+          bindings: { X: "vocab.txt", S: "HuggingFace Hub" },
+          sub: [
+            { goal: "hash_ok(vocab.txt)", rule: "CID == SHA2-256(data) ✓" },
+            { goal: "known_source(vocab.txt)", rule: "origin == huggingface.co ✓" },
+          ],
+        },
+      };
+      vocab.providers = [
+        { peer: "12D3KooW…Hank", region: "us-east", rttMs: 52, role: "origin" },
+        { peer: "12D3KooW…Jack", region: "ap-east", rttMs: 130 },
+      ];
+    }
+
+    // README.md
+    const readme = find("README.md");
+    if (readme) {
+      readme.dag = { cid: readme.cid, name: "README.md", size: readme.size, codec: "dag-json", links: [] };
+      readme.proof = {
+        verified: false,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "authored(README.md)",
+          rule: "authored(X) :- signed(X).",
+          bindings: { X: "README.md" },
+          sub: [{ goal: "signed(README.md)", rule: "подпись не найдена ✗" }],
+        },
+      };
+      readme.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 11, role: "origin" },
+      ];
+    }
   }
 
+  // ── datasets ────────────────────────────────────────────────────────────────
   if (bucket === "datasets") {
+    // manifest.json — full proof + providers
     const man = find("manifest.json");
     if (man) {
+      man.dag = { cid: man.cid, name: "manifest.json", size: man.size, codec: "dag-json", links: [] };
       man.proof = {
         verified: true,
         engine: "TensorLogic · Datalog",
@@ -211,6 +373,177 @@ async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> 
         { peer: "12D3KooW…Erin", region: "us-west", rttMs: 92 },
       ];
     }
+
+    // wiki/train.parquet
+    const train = find("wiki/train.parquet");
+    if (train) {
+      train.dag = {
+        cid: train.cid,
+        name: "train.parquet",
+        size: train.size,
+        codec: "dag-pb",
+        links: [
+          { cid: await cid("train-row-group-0"), name: "row-group-0.parquet", size: 402_000_000, codec: "raw", links: [] },
+          { cid: await cid("train-row-group-1"), name: "row-group-1.parquet", size: 402_000_000, codec: "raw", links: [] },
+          { cid: await cid("train-row-group-2"), name: "row-group-2.parquet", size: 400_887_552, codec: "raw", links: [] },
+        ],
+      };
+      train.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "dataset_authentic(wiki/train.parquet)",
+          rule: "dataset_authentic(X) :- licensed(X), hash_ok(X).",
+          bindings: { X: "wiki/train.parquet" },
+          sub: [
+            { goal: "licensed(wiki/train.parquet)", rule: "CC-BY-SA 4.0 ✓" },
+            { goal: "hash_ok(wiki/train.parquet)", rule: "CID совпадает ✓" },
+          ],
+        },
+      };
+      train.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 13, role: "origin" },
+        { peer: "12D3KooW…Bob", region: "us-east", rttMs: 74 },
+        { peer: "12D3KooW…Carol", region: "ap-south", rttMs: 156 },
+      ];
+    }
+
+    // wiki/valid.parquet
+    const valid = find("wiki/valid.parquet");
+    if (valid) {
+      valid.dag = {
+        cid: valid.cid,
+        name: "valid.parquet",
+        size: valid.size,
+        codec: "dag-pb",
+        links: [
+          { cid: await cid("valid-row-group-0"), name: "row-group-0.parquet", size: 96_337_920, codec: "raw", links: [] },
+        ],
+      };
+      valid.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "dataset_authentic(wiki/valid.parquet)",
+          rule: "dataset_authentic(X) :- licensed(X), hash_ok(X).",
+          bindings: { X: "wiki/valid.parquet" },
+          sub: [
+            { goal: "licensed(wiki/valid.parquet)", rule: "CC-BY-SA 4.0 ✓" },
+            { goal: "hash_ok(wiki/valid.parquet)", rule: "CID совпадает ✓" },
+          ],
+        },
+      };
+      valid.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 13, role: "origin" },
+        { peer: "12D3KooW…Erin", region: "us-west", rttMs: 92 },
+      ];
+    }
+
+    // embeddings/vectors.bin
+    const vecs = find("embeddings/vectors.bin");
+    if (vecs) {
+      vecs.dag = {
+        cid: vecs.cid,
+        name: "vectors.bin",
+        size: vecs.size,
+        codec: "dag-pb",
+        links: [
+          { cid: await cid("vec-chunk-0"), name: "chunk-0.bin", size: 134_217_728, codec: "raw", links: [] },
+          { cid: await cid("vec-chunk-1"), name: "chunk-1.bin", size: 134_217_728, codec: "raw", links: [] },
+        ],
+      };
+      vecs.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "vectors_consistent(embeddings/vectors.bin)",
+          rule: "vectors_consistent(X) :- dim_ok(X), norm_ok(X).",
+          bindings: { X: "vectors.bin", dim: "768" },
+          sub: [
+            { goal: "dim_ok(vectors.bin)", rule: "embedding dim == 768 ✓" },
+            { goal: "norm_ok(vectors.bin)", rule: "L2 norms ∈ [0.98, 1.02] ✓" },
+          ],
+        },
+      };
+      vecs.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 13, role: "origin" },
+        { peer: "12D3KooW…Frank", region: "eu-west", rttMs: 44 },
+      ];
+    }
+  }
+
+  // ── site-assets ─────────────────────────────────────────────────────────────
+  if (bucket === "site-assets") {
+    const img = find("img/banner.jpg");
+    if (img) {
+      img.dag = { cid: img.cid, name: "banner.jpg", size: img.size, codec: "raw", links: [] };
+      img.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "asset_ok(img/banner.jpg)",
+          rule: "asset_ok(X) :- mime_ok(X), cid_ok(X).",
+          bindings: { X: "img/banner.jpg", mime: "image/jpeg" },
+          sub: [
+            { goal: "mime_ok(img/banner.jpg)", rule: "Content-Type: image/jpeg ✓" },
+            { goal: "cid_ok(img/banner.jpg)", rule: "CID совпадает ✓" },
+          ],
+        },
+      };
+      img.providers = [
+        { peer: "12D3KooW…Kate", region: "us-east", rttMs: 38, role: "origin" },
+        { peer: "12D3KooW…Leo", region: "eu-west", rttMs: 67 },
+      ];
+    }
+
+    const logo = find("img/logo.svg");
+    if (logo) {
+      logo.dag = { cid: logo.cid, name: "logo.svg", size: logo.size, codec: "raw", links: [] };
+      logo.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "asset_ok(img/logo.svg)",
+          rule: "asset_ok(X) :- mime_ok(X), cid_ok(X).",
+          bindings: { X: "img/logo.svg", mime: "image/svg+xml" },
+          sub: [
+            { goal: "mime_ok(img/logo.svg)", rule: "Content-Type: image/svg+xml ✓" },
+            { goal: "cid_ok(img/logo.svg)", rule: "CID совпадает ✓" },
+          ],
+        },
+      };
+      logo.providers = [
+        { peer: "12D3KooW…Kate", region: "us-east", rttMs: 38, role: "origin" },
+      ];
+    }
+
+    const html = find("index.html");
+    if (html) {
+      html.dag = {
+        cid: html.cid,
+        name: "index.html",
+        size: html.size,
+        codec: "dag-json",
+        links: [
+          { cid: await cid("style-css"), name: "style.css", size: 12_450, codec: "raw", links: [] },
+          { cid: await cid("app-js"), name: "app.js", size: 14_800, codec: "raw", links: [] },
+        ],
+      };
+      html.proof = {
+        verified: false,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "page_signed(index.html)",
+          rule: "page_signed(X) :- sig_valid(X).",
+          bindings: { X: "index.html" },
+          sub: [{ goal: "sig_valid(index.html)", rule: "подпись отсутствует ✗" }],
+        },
+      };
+      html.providers = [
+        { peer: "12D3KooW…Kate", region: "us-east", rttMs: 38, role: "origin" },
+        { peer: "12D3KooW…Mia", region: "ap-east", rttMs: 180 },
+      ];
+    }
   }
 }
 
@@ -220,7 +553,7 @@ async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> 
  * Idempotent; never touches user-uploaded objects.
  */
 export async function ensureDemoData(): Promise<void> {
-  for (const bucket of ["ml-models", "datasets"]) {
+  for (const bucket of Object.keys(SEEDS)) {
     const objs = listObjects(bucket);
     if (!objs.length) continue;
     const key = (o: S3Object) => `${o.dag ? 1 : 0}${o.proof ? 1 : 0}${o.providers ? 1 : 0}`;
@@ -231,7 +564,28 @@ export async function ensureDemoData(): Promise<void> {
 }
 
 export async function seedIfEmpty(): Promise<void> {
-  if (localStorage.getItem(BUCKETS_KEY)) return;
+  // If seed version changed, wipe and re-seed to pick up new demo data.
+  const storedVer = localStorage.getItem(SEED_VER_KEY);
+  if (storedVer !== SEED_VERSION) {
+    // Remove bucket data (keeps user-created buckets intact only when ver matches).
+    if (localStorage.getItem(BUCKETS_KEY)) {
+      for (const name of Object.keys(SEEDS)) {
+        localStorage.removeItem(OBJ_PREFIX + name);
+      }
+      // Remove bucket entries for known seed buckets so they are re-created.
+      const existing: Bucket[] = listBuckets();
+      const filtered = existing.filter((b) => !Object.keys(SEEDS).includes(b.name));
+      if (filtered.length < existing.length) saveBuckets(filtered);
+    }
+    localStorage.setItem(SEED_VER_KEY, SEED_VERSION);
+  }
+
+  if (localStorage.getItem(BUCKETS_KEY)) {
+    // Buckets already exist — only enrich stale objects.
+    await ensureDemoData();
+    return;
+  }
+
   const now = Date.now();
   const day = 86_400_000;
   const buckets: Bucket[] = [];
@@ -273,3 +627,4 @@ export async function seedIfEmpty(): Promise<void> {
   }
   saveBuckets(buckets);
 }
+

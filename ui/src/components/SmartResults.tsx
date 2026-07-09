@@ -1,5 +1,5 @@
 import type { S3Object } from "../types";
-import type { Ranked } from "../lib/search";
+import type { HighlightRange, Ranked } from "../lib/search";
 import { fileCategory, humanSize, relTime } from "../lib/format";
 import {
   IconArchive,
@@ -33,6 +33,24 @@ function Glyph({ name, type }: { name: string; type: string }) {
   );
 }
 
+/** Render a string with highlighted ranges. */
+function Highlighted({ text, ranges }: { text: string; ranges?: HighlightRange[] }) {
+  if (!ranges || !ranges.length) return <>{text}</>;
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const r of ranges) {
+    if (r.start > cursor) parts.push(<span key={cursor}>{text.slice(cursor, r.start)}</span>);
+    parts.push(
+      <mark key={r.start} className="hl">
+        {text.slice(r.start, r.end)}
+      </mark>,
+    );
+    cursor = r.end;
+  }
+  if (cursor < text.length) parts.push(<span key={cursor}>{text.slice(cursor)}</span>);
+  return <>{parts}</>;
+}
+
 interface Props {
   query: string;
   results: Ranked[];
@@ -49,7 +67,7 @@ export function SmartResults({ query, results, onOpen, onDownload }: Props) {
         </div>
         <p>Умный поиск по содержимому и метаданным</p>
         <span className="hint">
-          Ранжирует объекты по релевантности; для текстовых файлов ищет по реальному содержимому.
+          Ранжирует объекты по релевантности; для текстовых файлов ищет по содержимому.
         </span>
       </div>
     );
@@ -64,17 +82,26 @@ export function SmartResults({ query, results, onOpen, onDownload }: Props) {
   return (
     <div className="smart-results">
       <div className="smart-head">
-        {results.length} результатов · ранжировано по релевантности
+        <span>{results.length} результатов</span>
+        <span className="smart-head-hint">· ранжировано по релевантности (лексика + n-gram)</span>
       </div>
       {results.map((r) => (
         <div key={r.object.key} className="smart-row" onClick={() => onOpen(r.object.key)}>
           <Glyph name={r.object.key} type={r.object.contentType} />
           <div className="sr-main">
             <div className="sr-name">
-              <span className="sr-key" title={r.object.key}>{r.object.key}</span>
-              <span className="sr-where">{r.where}</span>
+              <span className="sr-key" title={r.object.key}>
+                <Highlighted text={r.object.key} ranges={r.highlights} />
+              </span>
+              <span className={"sr-where" + (r.where === "содержимое" ? " content" : "")}>
+                {r.where}
+              </span>
             </div>
-            {r.snippet && <div className="sr-snip">{r.snippet}</div>}
+            {r.snippet && (
+              <div className="sr-snip" title={r.snippet}>
+                <Highlighted text={r.snippet} ranges={r.snippetHighlight} />
+              </div>
+            )}
             <div className="sr-meta">
               {humanSize(r.object.size)} · {relTime(r.object.lastModified)}
             </div>

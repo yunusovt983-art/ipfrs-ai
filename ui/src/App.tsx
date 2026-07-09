@@ -22,13 +22,14 @@ import {
   saveObjects,
   seedIfEmpty,
 } from "./lib/buckets";
-import { demoCid, IpfrsClient } from "./lib/ipfrs";
+import { demoCid, IpfrsClient, buildQueryEmbedding } from "./lib/ipfrs";
 import { guessType } from "./lib/format";
 import { smartSearch, type Ranked } from "./lib/search";
 import { Sidebar } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { ObjectList } from "./components/ObjectList";
 import { SmartResults } from "./components/SmartResults";
+import { SemanticSearchPanel } from "./components/SemanticSearchPanel";
 import { DetailsDrawer } from "./components/DetailsDrawer";
 import { BlockInspector } from "./components/BlockInspector";
 import { DagExplorer } from "./components/DagExplorer";
@@ -74,6 +75,7 @@ export function App() {
   const [view, setView] = useState<"list" | "grid">("list");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [smart, setSmart] = useState(false);
+  const [semantic, setSemantic] = useState(false);
   const [ranked, setRanked] = useState<Ranked[]>([]);
   const [inspect, setInspect] = useState<S3Object | null>(null);
   const [dagObj, setDagObj] = useState<S3Object | null>(null);
@@ -225,13 +227,17 @@ export function App() {
       const bucket = currentBucket;
       const policy = getPolicy(bucket);
       cancelUpload.current = false;
-      setUploadItems(list.map((f) => ({ name: f.name, size: f.size, status: "pending" })));
+      setUploadItems(list.map((f) => ({ name: f.name, size: f.size, status: "pending", file: f })));
 
       let objs = listObjects(bucket);
       if (policy.quotaBytes > 0) {
         const used = objs.reduce((s, o) => s + o.size, 0);
         const incoming = list.reduce((s, f) => s + f.size, 0);
-        if (used + incoming > policy.quotaBytes) toast("info", "Превышена мягкая квота бакета");
+        if (used + incoming > policy.quotaBytes) {
+          toast("error", `Квота бакета превышена: использовано ${Math.round(used / 1024 / 1024)} МБ из ${Math.round(policy.quotaBytes / 1024 / 1024)} МБ`);
+          setUploadItems([]);
+          return;
+        }
       }
 
       let done = 0;
@@ -249,7 +255,11 @@ export function App() {
           let cid: string;
           let pinned = false;
           if (settings.mode === "live") {
-            const r = await client.add(file);
+            const r = await client.addWithProgress(file, (pct) => {
+              setUploadItems((its) =>
+                its.map((it, idx) => (idx === i ? { ...it, progress: pct } : it)),
+              );
+            });
             cid = r.cid;
             if (settings.pinOnUpload || policy.autopin) {
               try {
@@ -259,10 +269,34 @@ export function App() {
                 pinned = false;
               }
             }
+            // Auto-index in semantic search after upload
+            try {
+              const embedding = buildQueryEmbedding(file.name + " " + (file.type || ""));
+              await client.semanticIndex(cid, embedding);
+            } catch {
+              // Non-critical — search still works via ngram fallback
+            }
           } else {
+            // Demo: compute pseudo-CID + animate upload progress
             const buf = await file.arrayBuffer();
             cid = await demoCid(buf);
             blobCache.set(cid, file);
+            // Simulate progress animation
+            await new Promise<void>((resolve) => {
+              const steps = [10, 35, 65, 88, 100];
+              let s = 0;
+              const tick = () => {
+                const pct = steps[s++];
+                setUploadItems((its) =>
+                  its.map((it, idx) =>
+                    idx === i ? { ...it, progress: pct } : it,
+                  ),
+                );
+                if (s < steps.length) setTimeout(tick, 60);
+                else resolve();
+              };
+              setTimeout(tick, 40);
+            });
             pinned = true;
           }
           const prev = objs.find((o) => o.key === key);
@@ -302,6 +336,69 @@ export function App() {
     cancelUpload.current = true;
     toast("info", "Загрузка отменяется…");
   }, [toast]);
+
+  /** Retry a single failed upload by index. */
+  const retryUpload = useCallback(
+    async (idx: number) => {
+      const item = uploadItems[idx];
+      if (!item?.file || !currentBucket) return;
+      const bucket = currentBucket;
+      const policy = getPolicy(bucket);
+      const file = item.file;
+      const key = prefix + file.name;
+
+      setUploadItems((its) =>
+        its.map((it, i) => (i === idx ? { ...it, status: "uploading", error: undefined, progress: 0 } : it)),
+      );
+
+      try {
+        let cid: string;
+        let pinned = false;
+        if (settings.mode === "live") {
+          const r = await client.addWithProgress(file, (pct) => {
+            setUploadItems((its) =>
+              its.map((it, i) => (i === idx ? { ...it, progress: pct } : it)),
+            );
+          });
+          cid = r.cid;
+          if (settings.pinOnUpload || policy.autopin) {
+            try { await client.pin(cid); pinned = true; } catch { pinned = false; }
+          }
+        } else {
+          const buf = await file.arrayBuffer();
+          cid = await demoCid(buf);
+          blobCache.set(cid, file);
+          await new Promise<void>((resolve) => {
+            const steps = [10, 35, 65, 88, 100];
+            let s = 0;
+            const tick = () => {
+              setUploadItems((its) => its.map((it, i) => (i === idx ? { ...it, progress: steps[s] } : it)));
+              if (++s < steps.length) setTimeout(tick, 60);
+              else resolve();
+            };
+            setTimeout(tick, 40);
+          });
+          pinned = true;
+        }
+        let objs = listObjects(bucket);
+        const prev = objs.find((o) => o.key === key);
+        const versions =
+          policy.versioning && prev
+            ? [{ cid: prev.cid, size: prev.size, contentType: prev.contentType, lastModified: prev.lastModified }, ...(prev.versions ?? [])]
+            : undefined;
+        const obj: S3Object = { key, cid, size: file.size, contentType: file.type || guessType(file.name), lastModified: Date.now(), pinned, versions };
+        objs = [...objs.filter((o) => o.key !== key), obj];
+        persist(bucket, objs);
+        setUploadItems((its) => its.map((it, i) => (i === idx ? { ...it, status: "done" } : it)));
+        toast("success", `Повторно загружен: ${file.name}`);
+      } catch (e) {
+        setUploadItems((its) =>
+          its.map((it, i) => (i === idx ? { ...it, status: "error", error: (e as Error).message } : it)),
+        );
+      }
+    },
+    [client, currentBucket, persist, prefix, settings, toast, uploadItems],
+  );
 
   const createFolder = useCallback(
     (name: string) => {
@@ -449,7 +546,27 @@ export function App() {
     [client, settings.mode, toast],
   );
 
-  // ---- bulk actions -----------------------------------------------------
+  // ---- rename -----------------------------------------------------------
+  const renameObject = useCallback(
+    (oldKey: string, newBasename: string) => {
+      if (!currentBucket) return;
+      const newBaseTrimmed = newBasename.trim().replace(/\//g, "");
+      if (!newBaseTrimmed) return;
+      const prefix = oldKey.includes("/") ? oldKey.slice(0, oldKey.lastIndexOf("/") + 1) : "";
+      const newKey = prefix + newBaseTrimmed;
+      const objs = listObjects(currentBucket);
+      if (objs.some((o) => o.key === newKey)) {
+        toast("error", `Объект «${newKey}» уже существует`);
+        return;
+      }
+      const next = objs.map((o) => (o.key === oldKey ? { ...o, key: newKey } : o));
+      persist(currentBucket, next);
+      if (selectedKey === oldKey) setSelectedKey(newKey);
+      toast("success", `Переименовано: ${newBaseTrimmed}`);
+    },
+    [currentBucket, persist, selectedKey, toast],
+  );
+
   const toggleSelect = useCallback((key: string) => {
     setSelected((s) => {
       const n = new Set(s);
@@ -509,6 +626,51 @@ export function App() {
     el.setAttribute("data-theme", next);
     localStorage.setItem(THEME_KEY, next);
   }, []);
+
+  // ---- keyboard shortcuts -----------------------------------------------
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const isEditing =
+        tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement).isContentEditable;
+
+      // ⌘K / Ctrl+K — focus search (allowed even when editing)
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        const el = document.querySelector<HTMLInputElement>(".search input");
+        if (el) { el.focus(); el.select(); }
+        return;
+      }
+
+      if (isEditing) return;
+
+      // Escape — close modals / drawer / clear search in priority order
+      if (e.key === "Escape") {
+        if (inspect)       { setInspect(null);       return; }
+        if (dagObj)        { setDagObj(null);         return; }
+        if (proofObj)      { setProofObj(null);       return; }
+        if (providersObj)  { setProvidersObj(null);   return; }
+        if (showSettings)  { setShowSettings(false);  return; }
+        if (policyBucket)  { setPolicyBucket(null);   return; }
+        if (selectedKey)   { setSelectedKey(null);    return; }
+        if (query)         { setQuery("");            return; }
+        return;
+      }
+
+      // Del — delete selected objects (requires confirmation)
+      if (e.key === "Delete" && selected.size > 0) {
+        e.preventDefault();
+        if (confirm(`Удалить ${selected.size} объект(ов)?`)) bulkDelete();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [
+    inspect, dagObj, proofObj, providersObj, showSettings, policyBucket,
+    selectedKey, query, selected, bulkDelete,
+  ]);
 
   // ---- derived ----------------------------------------------------------
   const entries: BrowserEntry[] = useMemo(() => {
@@ -597,6 +759,8 @@ export function App() {
               onNavigate={(p) => navigateTo(currentBucket, p)}
               onQuery={setQuery}
               onSmart={setSmart}
+              onSemantic={setSemantic}
+              semantic={semantic}
               onUpload={() => fileInput.current?.click()}
               onNewFolder={createFolder}
               onRefresh={refresh}
@@ -606,6 +770,15 @@ export function App() {
               <SmartResults
                 query={query}
                 results={ranked}
+                onOpen={(k) => setSelectedKey(k)}
+                onDownload={download}
+              />
+            ) : semantic && query.trim() ? (
+              <SemanticSearchPanel
+                query={query}
+                objects={objects}
+                mode={settings.mode}
+                client={client}
                 onOpen={(k) => setSelectedKey(k)}
                 onDownload={download}
               />
@@ -627,7 +800,9 @@ export function App() {
               onDelete={deleteObject}
               onCopy={copyCid}
               onShare={shareLink}
+              onPin={togglePin}
               onUpload={() => fileInput.current?.click()}
+              onRename={renameObject}
             />
             )}
           </>
@@ -704,6 +879,7 @@ export function App() {
       {policyBucket && (
         <BucketPolicyModal
           bucket={policyBucket}
+          usedBytes={stats.size}
           onClose={() => setPolicyBucket(null)}
           onSaved={() => toast("success", "Политики сохранены")}
         />
@@ -711,7 +887,7 @@ export function App() {
 
       <Toasts toasts={toasts} />
       {(dragging || uploadItems.length > 0) && (
-        <UploadOverlay dragging={dragging} items={uploadItems} onCancel={cancelUploads} />
+      <UploadOverlay dragging={dragging} items={uploadItems} onCancel={cancelUploads} onRetry={retryUpload} />
       )}
 
       <input

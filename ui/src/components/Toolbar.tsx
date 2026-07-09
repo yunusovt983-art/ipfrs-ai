@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { humanSize } from "../lib/format";
 import {
   IconChevron,
@@ -14,6 +14,7 @@ interface Props {
   query: string;
   view: "list" | "grid";
   smart: boolean;
+  semantic: boolean;
   stats: { count: number; size: number };
   canBack: boolean;
   canForward: boolean;
@@ -23,6 +24,7 @@ interface Props {
   onNavigate: (prefix: string) => void;
   onQuery: (q: string) => void;
   onSmart: (v: boolean) => void;
+  onSemantic: (v: boolean) => void;
   onUpload: () => void;
   onNewFolder: (name: string) => void;
   onRefresh: () => void;
@@ -35,6 +37,7 @@ export function Toolbar({
   query,
   view,
   smart,
+  semantic,
   stats,
   canBack,
   canForward,
@@ -44,6 +47,7 @@ export function Toolbar({
   onNavigate,
   onQuery,
   onSmart,
+  onSemantic,
   onUpload,
   onNewFolder,
   onRefresh,
@@ -52,6 +56,7 @@ export function Toolbar({
   const [newFolder, setNewFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [openCrumb, setOpenCrumb] = useState<number | null>(null);
+  const crumbsRef = useRef<HTMLDivElement>(null);
 
   const segments = prefix ? prefix.replace(/\/$/, "").split("/") : [];
   const crumbTo = (idx: number) => segments.slice(0, idx + 1).join("/") + "/";
@@ -63,6 +68,18 @@ export function Toolbar({
     setNewFolder(false);
   };
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (openCrumb === null) return;
+    const handler = (e: MouseEvent) => {
+      if (crumbsRef.current && !crumbsRef.current.contains(e.target as Node)) {
+        setOpenCrumb(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [openCrumb]);
+
   // Dropdown of sibling folders for crumb `idx` (-1 = bucket root).
   const Dropdown = ({ idx }: { idx: number }) => {
     const parent = idx < 0 ? "" : parentOf(idx);
@@ -70,10 +87,11 @@ export function Toolbar({
     const sibs = foldersAt(parent).filter((f) => f !== current);
     if (!sibs.length) return null;
     return (
-      <div className="crumb-menu" onMouseLeave={() => setOpenCrumb(null)}>
+      <div className="crumb-menu" role="menu">
         {sibs.map((f) => (
           <button
             key={f}
+            role="menuitem"
             onClick={() => {
               onNavigate(parent + f + "/");
               setOpenCrumb(null);
@@ -88,7 +106,7 @@ export function Toolbar({
 
   return (
     <div className="toolbar">
-      <div className="crumbs">
+      <div className="crumbs" ref={crumbsRef}>
         <div className="navhist">
           <button className="icon-btn" title="Назад" disabled={!canBack} onClick={onBack}>
             <IconChevron size={16} style={{ transform: "rotate(180deg)" }} />
@@ -104,8 +122,9 @@ export function Toolbar({
           </button>
           {foldersAt("").filter((f) => f !== segments[0]).length > 0 && (
             <button
-              className="crumb-caret"
+              className={"crumb-caret" + (openCrumb === -1 ? " open" : "")}
               onClick={() => setOpenCrumb((v) => (v === -1 ? null : -1))}
+              aria-expanded={openCrumb === -1}
             >
               <IconChevron size={12} style={{ transform: "rotate(90deg)" }} />
             </button>
@@ -125,8 +144,9 @@ export function Toolbar({
             </button>
             {foldersAt(parentOf(i)).filter((f) => f !== seg).length > 0 && (
               <button
-                className="crumb-caret"
+                className={"crumb-caret" + (openCrumb === i ? " open" : "")}
                 onClick={() => setOpenCrumb((v) => (v === i ? null : i))}
+                aria-expanded={openCrumb === i}
               >
                 <IconChevron size={12} style={{ transform: "rotate(90deg)" }} />
               </button>
@@ -141,20 +161,29 @@ export function Toolbar({
       </div>
 
       <div className="tools">
-        <div className={"search" + (smart ? " smart" : "")}>
+        <div className={"search" + (smart ? " smart" : "") + (semantic ? " semantic" : "")}>
           <IconSearch size={16} />
           <input
-            placeholder={smart ? "Умный поиск по содержимому…" : "Поиск объектов…"}
+            placeholder={semantic ? "Семантический поиск…" : smart ? "Умный поиск по содержимому…" : "Поиск объектов…"}
             value={query}
             onChange={(e) => onQuery(e.target.value)}
           />
-          <button
-            className={"smart-toggle" + (smart ? " on" : "")}
-            title="Умный поиск (по содержимому и метаданным)"
-            onClick={() => onSmart(!smart)}
-          >
-            ✦ Умный
-          </button>
+          <div className="search-toggles">
+            <button
+              className={"smart-toggle" + (smart ? " on" : "")}
+              title="Умный поиск (лексика + n-gram по содержимому)"
+              onClick={() => { onSmart(!smart); if (!smart) onSemantic(false); }}
+            >
+              ✦ Smart
+            </button>
+            <button
+              className={"smart-toggle vec-toggle" + (semantic ? " on" : "")}
+              title="Семантический поиск (vector embedding)"
+              onClick={() => { onSemantic(!semantic); if (!semantic) onSmart(false); }}
+            >
+              ⬡ Vector
+            </button>
+          </div>
         </div>
 
         {newFolder ? (
