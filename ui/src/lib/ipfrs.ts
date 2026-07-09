@@ -140,10 +140,17 @@ export class IpfrsClient {
   }
 
   async pin(cid: string): Promise<void> {
-    // Best-effort; the gateway may not expose pin/add — ignore failures.
-    await fetch(this.url(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`), {
+    const res = await fetch(this.url(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`), {
       method: "POST",
-    }).catch(() => undefined);
+    });
+    if (!res.ok) throw new Error(`pin: HTTP ${res.status}`);
+  }
+
+  async unpin(cid: string): Promise<void> {
+    const res = await fetch(this.url(`/api/v0/pin/rm?arg=${encodeURIComponent(cid)}`), {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`unpin: HTTP ${res.status}`);
   }
 }
 

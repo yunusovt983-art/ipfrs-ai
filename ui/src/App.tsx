@@ -7,6 +7,7 @@ import type {
   S3Object,
   Settings,
   Toast,
+  UploadItem,
 } from "./types";
 import {
   blobCache,
@@ -14,6 +15,7 @@ import {
   deleteBucketData,
   deriveEntries,
   ensureDemoData,
+  getPolicy,
   listBuckets,
   listObjects,
   saveBuckets,
@@ -33,6 +35,7 @@ import { DagExplorer } from "./components/DagExplorer";
 import { ProvenanceModal } from "./components/ProvenanceModal";
 import { ProvidersModal } from "./components/ProvidersModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { BucketPolicyModal } from "./components/BucketPolicyModal";
 import { Toasts } from "./components/Toasts";
 import { UploadOverlay } from "./components/UploadOverlay";
 
@@ -66,7 +69,7 @@ export function App() {
   const [info, setInfo] = useState<GatewayInfo | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showSettings, setShowSettings] = useState(false);
-  const [upload, setUpload] = useState<{ done: number; total: number; name: string } | null>(null);
+  const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -76,7 +79,11 @@ export function App() {
   const [dagObj, setDagObj] = useState<S3Object | null>(null);
   const [proofObj, setProofObj] = useState<S3Object | null>(null);
   const [providersObj, setProvidersObj] = useState<S3Object | null>(null);
+  const [policyBucket, setPolicyBucket] = useState<string | null>(null);
+  const [hist, setHist] = useState<{ bucket: string; prefix: string }[]>([]);
+  const [histIdx, setHistIdx] = useState(-1);
   const fileInput = useRef<HTMLInputElement>(null);
+  const cancelUpload = useRef(false);
   const toastId = useRef(0);
 
   const client = useMemo(() => new IpfrsClient(settings.gateway), [settings.gateway]);
@@ -124,14 +131,39 @@ export function App() {
   }, [testConnection]);
 
   // ---- bucket / navigation ---------------------------------------------
-  const selectBucket = useCallback((name: string) => {
-    setCurrentBucket(name);
-    setPrefix("");
+  const applyLocation = useCallback((bucket: string, pfx: string) => {
+    setCurrentBucket(bucket);
+    setPrefix(pfx);
     setQuery("");
     setSelectedKey(null);
     setSelected(new Set());
-    setObjects(listObjects(name));
+    setObjects(listObjects(bucket));
   }, []);
+
+  const navigateTo = useCallback(
+    (bucket: string, pfx: string) => {
+      applyLocation(bucket, pfx);
+      setHist((h) => [...h.slice(0, histIdx + 1), { bucket, prefix: pfx }]);
+      setHistIdx((i) => i + 1);
+    },
+    [applyLocation, histIdx],
+  );
+
+  const selectBucket = useCallback((name: string) => navigateTo(name, ""), [navigateTo]);
+
+  const back = useCallback(() => {
+    if (histIdx <= 0) return;
+    const i = histIdx - 1;
+    setHistIdx(i);
+    applyLocation(hist[i].bucket, hist[i].prefix);
+  }, [applyLocation, hist, histIdx]);
+
+  const forward = useCallback(() => {
+    if (histIdx >= hist.length - 1) return;
+    const i = histIdx + 1;
+    setHistIdx(i);
+    applyLocation(hist[i].bucket, hist[i].prefix);
+  }, [applyLocation, hist, histIdx]);
 
   const refresh = useCallback(() => {
     if (currentBucket) setObjects(listObjects(currentBucket));
@@ -191,11 +223,27 @@ export function App() {
       const list = Array.from(files);
       if (!list.length) return;
       const bucket = currentBucket;
+      const policy = getPolicy(bucket);
+      cancelUpload.current = false;
+      setUploadItems(list.map((f) => ({ name: f.name, size: f.size, status: "pending" })));
+
       let objs = listObjects(bucket);
-      setUpload({ done: 0, total: list.length, name: list[0].name });
+      if (policy.quotaBytes > 0) {
+        const used = objs.reduce((s, o) => s + o.size, 0);
+        const incoming = list.reduce((s, f) => s + f.size, 0);
+        if (used + incoming > policy.quotaBytes) toast("info", "Превышена мягкая квота бакета");
+      }
+
+      let done = 0;
       for (let i = 0; i < list.length; i++) {
+        if (cancelUpload.current) {
+          setUploadItems((its) =>
+            its.map((it, idx) => (idx >= i && it.status === "pending" ? { ...it, status: "cancelled" } : it)),
+          );
+          break;
+        }
         const file = list[i];
-        setUpload({ done: i, total: list.length, name: file.name });
+        setUploadItems((its) => its.map((it, idx) => (idx === i ? { ...it, status: "uploading" } : it)));
         const key = prefix + file.name;
         try {
           let cid: string;
@@ -203,9 +251,13 @@ export function App() {
           if (settings.mode === "live") {
             const r = await client.add(file);
             cid = r.cid;
-            if (settings.pinOnUpload) {
-              await client.pin(cid);
-              pinned = true;
+            if (settings.pinOnUpload || policy.autopin) {
+              try {
+                await client.pin(cid);
+                pinned = true;
+              } catch {
+                pinned = false;
+              }
             }
           } else {
             const buf = await file.arrayBuffer();
@@ -214,17 +266,13 @@ export function App() {
             pinned = true;
           }
           const prev = objs.find((o) => o.key === key);
-          const versions = prev
-            ? [
-                {
-                  cid: prev.cid,
-                  size: prev.size,
-                  contentType: prev.contentType,
-                  lastModified: prev.lastModified,
-                },
-                ...(prev.versions ?? []),
-              ]
-            : undefined;
+          const versions =
+            policy.versioning && prev
+              ? [
+                  { cid: prev.cid, size: prev.size, contentType: prev.contentType, lastModified: prev.lastModified },
+                  ...(prev.versions ?? []),
+                ]
+              : undefined;
           const obj: S3Object = {
             key,
             cid,
@@ -235,16 +283,25 @@ export function App() {
             versions,
           };
           objs = [...objs.filter((o) => o.key !== key), obj];
+          persist(bucket, objs);
+          done++;
+          setUploadItems((its) => its.map((it, idx) => (idx === i ? { ...it, status: "done" } : it)));
         } catch (e) {
-          toast("error", `Ошибка загрузки ${file.name}: ${(e as Error).message}`);
+          setUploadItems((its) =>
+            its.map((it, idx) => (idx === i ? { ...it, status: "error", error: (e as Error).message } : it)),
+          );
         }
       }
-      persist(bucket, objs);
-      setUpload(null);
-      toast("success", `Загружено объектов: ${list.length}`);
+      if (done) toast("success", `Загружено объектов: ${done}`);
+      setTimeout(() => setUploadItems([]), 3000);
     },
     [client, currentBucket, persist, prefix, settings, toast],
   );
+
+  const cancelUploads = useCallback(() => {
+    cancelUpload.current = true;
+    toast("info", "Загрузка отменяется…");
+  }, [toast]);
 
   const createFolder = useCallback(
     (name: string) => {
@@ -279,6 +336,36 @@ export function App() {
       toast("info", "Объект удалён");
     },
     [currentBucket, persist, selectedKey, toast],
+  );
+
+  const togglePin = useCallback(
+    async (obj: S3Object) => {
+      if (!currentBucket) return;
+      const next = !obj.pinned;
+      if (settings.mode === "live" && obj.cid) {
+        try {
+          if (next) await client.pin(obj.cid);
+          else await client.unpin(obj.cid);
+        } catch (e) {
+          toast("error", `Pin: ${(e as Error).message}`);
+          return;
+        }
+      }
+      const objs = listObjects(currentBucket).map((o) =>
+        o.key === obj.key ? { ...o, pinned: next } : o,
+      );
+      persist(currentBucket, objs);
+      toast(next ? "success" : "info", next ? "Закреплено (pinned)" : "Откреплено");
+    },
+    [client, currentBucket, persist, settings.mode, toast],
+  );
+
+  const foldersAt = useCallback(
+    (pfx: string): string[] =>
+      deriveEntries(objects, pfx)
+        .filter((e) => e.kind === "folder")
+        .map((e) => (e as { name: string }).name),
+    [objects],
   );
 
   const downloadByCid = useCallback(
@@ -487,6 +574,7 @@ export function App() {
         onSelect={selectBucket}
         onCreate={createBucket}
         onDelete={deleteBucket}
+        onPolicy={(name) => setPolicyBucket(name)}
         onOpenSettings={() => setShowSettings(true)}
         onToggleTheme={toggleTheme}
       />
@@ -501,12 +589,12 @@ export function App() {
               view={view}
               smart={smart}
               stats={stats}
-              onNavigate={(p) => {
-                setPrefix(p);
-                setQuery("");
-                setSelectedKey(null);
-                clearSelection();
-              }}
+              canBack={histIdx > 0}
+              canForward={histIdx < hist.length - 1}
+              foldersAt={foldersAt}
+              onBack={back}
+              onForward={forward}
+              onNavigate={(p) => navigateTo(currentBucket, p)}
               onQuery={setQuery}
               onSmart={setSmart}
               onUpload={() => fileInput.current?.click()}
@@ -528,11 +616,7 @@ export function App() {
               selectedKey={selectedKey}
               selected={selected}
               searching={!!query.trim()}
-              onOpenFolder={(p) => {
-                setPrefix(p);
-                setSelectedKey(null);
-                clearSelection();
-              }}
+              onOpenFolder={(p) => navigateTo(currentBucket, p)}
               onOpenObject={(k) => setSelectedKey(k)}
               onToggle={toggleSelect}
               onToggleAll={toggleSelectAll}
@@ -564,6 +648,7 @@ export function App() {
           onDownloadVersion={downloadByCid}
           onCopy={copyCid}
           onShare={shareLink}
+          onPin={togglePin}
           onRestore={restoreVersion}
           onInspect={(o) => setInspect(o)}
           onDag={(o) => setDagObj(o)}
@@ -616,9 +701,18 @@ export function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+      {policyBucket && (
+        <BucketPolicyModal
+          bucket={policyBucket}
+          onClose={() => setPolicyBucket(null)}
+          onSaved={() => toast("success", "Политики сохранены")}
+        />
+      )}
 
       <Toasts toasts={toasts} />
-      {(dragging || upload) && <UploadOverlay dragging={dragging} upload={upload} />}
+      {(dragging || uploadItems.length > 0) && (
+        <UploadOverlay dragging={dragging} items={uploadItems} onCancel={cancelUploads} />
+      )}
 
       <input
         ref={fileInput}

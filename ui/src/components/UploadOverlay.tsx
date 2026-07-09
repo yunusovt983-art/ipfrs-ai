@@ -1,21 +1,47 @@
-import { IconUpload } from "./icons";
+import type { UploadItem, UploadStatus } from "../types";
+import { humanSize } from "../lib/format";
+import { IconCheck, IconClose, IconUpload } from "./icons";
 
 interface Props {
   dragging: boolean;
-  upload: { done: number; total: number; name: string } | null;
+  items: UploadItem[];
+  onCancel: () => void;
 }
 
-export function UploadOverlay({ dragging, upload }: Props) {
-  if (upload) {
-    const pct = Math.round((upload.done / upload.total) * 100);
+function StatusIcon({ s }: { s: UploadStatus }) {
+  if (s === "done") return <IconCheck size={13} />;
+  if (s === "error") return <IconClose size={13} />;
+  if (s === "uploading") return <span className="up-spin">◠</span>;
+  if (s === "cancelled") return <span>–</span>;
+  return <span className="up-dot" />;
+}
+
+export function UploadOverlay({ dragging, items, onCancel }: Props) {
+  if (items.length) {
+    const done = items.filter((i) => i.status === "done").length;
+    const active = items.some((i) => i.status === "pending" || i.status === "uploading");
     return (
-      <div className="upload-toast">
-        <div className="ut-head">
-          <IconUpload size={16} /> Загрузка {upload.done}/{upload.total}
+      <div className="upload-panel">
+        <div className="up-head">
+          <span className="up-title">
+            <IconUpload size={15} /> Загрузка {done}/{items.length}
+          </span>
+          {active && (
+            <button className="up-cancel" onClick={onCancel}>
+              Отмена
+            </button>
+          )}
         </div>
-        <div className="ut-name">{upload.name}</div>
-        <div className="ut-bar">
-          <i style={{ width: `${pct}%` }} />
+        <div className="up-list">
+          {items.map((it, idx) => (
+            <div className={"up-item " + it.status} key={idx} title={it.error || it.name}>
+              <span className="up-status">
+                <StatusIcon s={it.status} />
+              </span>
+              <span className="up-name">{it.name}</span>
+              <span className="up-size">{humanSize(it.size)}</span>
+            </div>
+          ))}
         </div>
       </div>
     );

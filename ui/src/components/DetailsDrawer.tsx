@@ -12,6 +12,7 @@ import {
   IconDownload,
   IconLink,
   IconModel,
+  IconPin,
   IconTrash,
 } from "./icons";
 
@@ -24,6 +25,7 @@ interface Props {
   onDownloadVersion: (cid: string, filename: string) => void;
   onCopy: (cid: string) => void;
   onShare: (o: S3Object) => void;
+  onPin: (o: S3Object) => void;
   onRestore: (key: string, versionCid: string) => void;
   onInspect: (o: S3Object) => void;
   onDag: (o: S3Object) => void;
@@ -41,6 +43,7 @@ export function DetailsDrawer({
   onDownloadVersion,
   onCopy,
   onShare,
+  onPin,
   onRestore,
   onInspect,
   onDag,
@@ -161,6 +164,13 @@ export function DetailsDrawer({
         </button>
         <button className="btn ghost" onClick={() => onShare(object)} disabled={!object.cid}>
           <IconLink size={16} /> Поделиться
+        </button>
+        <button
+          className={"btn ghost" + (object.pinned ? " pinned" : "")}
+          onClick={() => onPin(object)}
+          title={object.pinned ? "Открепить" : "Закрепить"}
+        >
+          <IconPin size={16} /> {object.pinned ? "Откр." : "Pin"}
         </button>
         <button className="btn ghost" onClick={() => onCopy(object.cid)} disabled={!object.cid}>
           <IconCopy size={16} /> CID

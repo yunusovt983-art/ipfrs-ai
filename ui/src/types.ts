@@ -72,6 +72,22 @@ export type BrowserEntry =
   | { kind: "folder"; name: string; prefix: string; count: number; size: number }
   | { kind: "object"; name: string; object: S3Object };
 
+/** Per-bucket policy (stored client-side). */
+export interface BucketPolicy {
+  versioning: boolean;
+  autopin: boolean;
+  /** Soft quota in bytes; 0 = unlimited. */
+  quotaBytes: number;
+}
+
+export type UploadStatus = "pending" | "uploading" | "done" | "error" | "cancelled";
+export interface UploadItem {
+  name: string;
+  size: number;
+  status: UploadStatus;
+  error?: string;
+}
+
 export type ConnMode = "demo" | "live";
 
 export interface Settings {

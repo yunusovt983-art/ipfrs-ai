@@ -4,12 +4,28 @@
 // live either on the IPFS gateway (live mode) or in an in-memory cache (demo /
 // freshly-uploaded), keyed by CID.
 
-import type { Bucket, BrowserEntry, DagNode, S3Object } from "../types";
+import type { Bucket, BrowserEntry, BucketPolicy, DagNode, S3Object } from "../types";
 import { demoCidFromString } from "./ipfrs";
 import { guessType } from "./format";
 
 const BUCKETS_KEY = "ipfrs.s3.buckets";
 const OBJ_PREFIX = "ipfrs.s3.objs.";
+const POLICY_PREFIX = "ipfrs.s3.policy.";
+
+export const DEFAULT_POLICY: BucketPolicy = { versioning: true, autopin: false, quotaBytes: 0 };
+
+export function getPolicy(bucket: string): BucketPolicy {
+  try {
+    const raw = localStorage.getItem(POLICY_PREFIX + bucket);
+    return raw ? { ...DEFAULT_POLICY, ...JSON.parse(raw) } : DEFAULT_POLICY;
+  } catch {
+    return DEFAULT_POLICY;
+  }
+}
+
+export function savePolicy(bucket: string, policy: BucketPolicy): void {
+  localStorage.setItem(POLICY_PREFIX + bucket, JSON.stringify(policy));
+}
 
 /** In-memory content cache (CID → Blob) for preview/download without a gateway. */
 export const blobCache = new Map<string, Blob>();

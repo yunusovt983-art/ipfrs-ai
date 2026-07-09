@@ -19,6 +19,7 @@ interface Props {
   onSelect: (name: string) => void;
   onCreate: (name: string) => void;
   onDelete: (name: string) => void;
+  onPolicy: (name: string) => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
 }
@@ -39,6 +40,7 @@ export function Sidebar({
   onSelect,
   onCreate,
   onDelete,
+  onPolicy,
   onOpenSettings,
   onToggleTheme,
 }: Props) {
@@ -108,6 +110,16 @@ export function Sidebar({
                   {objs.length} объектов · {humanSize(size)}
                 </div>
               </div>
+              <button
+                className="icon-btn ghost del"
+                title="Политики бакета"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPolicy(b.name);
+                }}
+              >
+                <IconGear size={14} />
+              </button>
               <button
                 className="icon-btn ghost del"
                 title="Удалить бакет"
