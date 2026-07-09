@@ -54,3 +54,6 @@ __pycache__/
 # Environment
 .env
 .env.local
+
+# TypeScript build info
+*.tsbuildinfo
