@@ -9,6 +9,14 @@ export interface Bucket {
   createdAt: number;
 }
 
+/** A previous content version of an object (S3-style versioning). */
+export interface ObjectVersion {
+  cid: string;
+  size: number;
+  contentType: string;
+  lastModified: number;
+}
+
 export interface S3Object {
   /** Full key within the bucket, e.g. "docs/spec/readme.md". */
   key: string;
@@ -19,6 +27,8 @@ export interface S3Object {
   lastModified: number;
   /** Whether the object is pinned on the gateway (best-effort). */
   pinned: boolean;
+  /** Prior versions, newest first. Grows each time the key is re-uploaded. */
+  versions?: ObjectVersion[];
 }
 
 /** A row in the object browser — either a virtual folder or a real object. */

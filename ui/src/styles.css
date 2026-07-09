@@ -145,8 +145,18 @@ a { color: var(--accent2); }
 .view-toggle button { background: none; border: none; color: var(--muted); width: 34px; height: 34px; font-size: 0.95rem; }
 .view-toggle button.active { background: var(--bg4); color: var(--text); }
 
+/* ---- bulk actions bar ---- */
+.list-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.bulk-bar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--bg3); border-bottom: 1px solid var(--border); }
+.bulk-count { font-weight: 600; font-size: 0.85rem; }
+.bulk-bar .btn.sm { padding: 6px 12px; font-size: 0.82rem; }
+
 /* ---- object table ---- */
 .table-scroll { flex: 1; overflow: auto; }
+.col-check { width: 40px; padding-left: 18px !important; padding-right: 0 !important; }
+.col-check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+tr.checked td { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.ver-badge { font-size: 0.66rem; font-weight: 700; color: var(--accent3); background: color-mix(in srgb, var(--accent3) 16%, transparent); border-radius: 5px; padding: 1px 5px; letter-spacing: 0.02em; }
 table.objects { width: 100%; border-collapse: collapse; }
 table.objects thead th {
   position: sticky; top: 0; z-index: 1; background: var(--bg); text-align: left;
@@ -187,6 +197,23 @@ table.objects td { padding: 10px 16px; border-bottom: 1px solid var(--border); v
 .grid-card .glyph { width: 52px; height: 52px; border-radius: 12px; }
 .gc-name { font-size: 0.85rem; font-weight: 500; word-break: break-word; max-width: 100%; }
 .gc-sub { font-size: 0.72rem; color: var(--faint); }
+.grid-card { position: relative; }
+.grid-card.checked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.gc-check { position: absolute; top: 8px; left: 8px; width: 15px; height: 15px; accent-color: var(--accent); opacity: 0; cursor: pointer; }
+.grid-card:hover .gc-check, .grid-card.checked .gc-check { opacity: 1; }
+
+/* ---- version history ---- */
+.versions { padding: 6px 18px 12px; border-top: 1px solid var(--border); }
+.versions-head { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 8px 0; }
+.version-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.version-row:last-child { border-bottom: none; }
+.v-tag { font-size: 0.7rem; font-weight: 700; color: var(--accent3); background: color-mix(in srgb, var(--accent3) 14%, transparent); border-radius: 6px; padding: 3px 7px; flex: 0 0 auto; }
+.version-row.current .v-tag { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.v-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.v-cid { font-size: 0.78rem; }
+.v-sub { font-size: 0.72rem; color: var(--faint); }
+.v-actions { display: flex; align-items: center; gap: 6px; }
+.v-actions .mini-btn { height: 26px; font-size: 0.72rem; }
 
 /* ---- empty states ---- */
 .empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--muted); padding: 40px; }

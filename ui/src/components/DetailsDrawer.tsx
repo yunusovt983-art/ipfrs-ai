@@ -17,7 +17,10 @@ interface Props {
   client: IpfrsClient;
   onClose: () => void;
   onDownload: (o: S3Object) => void;
+  onDownloadVersion: (cid: string, filename: string) => void;
   onCopy: (cid: string) => void;
+  onShare: (o: S3Object) => void;
+  onRestore: (key: string, versionCid: string) => void;
   onDelete: (key: string) => void;
 }
 
@@ -27,7 +30,10 @@ export function DetailsDrawer({
   client,
   onClose,
   onDownload,
+  onDownloadVersion,
   onCopy,
+  onShare,
+  onRestore,
   onDelete,
 }: Props) {
   const name = object.key.split("/").pop() || object.key;
@@ -106,9 +112,46 @@ export function DetailsDrawer({
         ))}
       </div>
 
+      {object.versions?.length ? (
+        <div className="versions">
+          <div className="versions-head">Версии ({object.versions.length + 1})</div>
+          <div className="version-row current">
+            <div className="v-tag">v{object.versions.length + 1}</div>
+            <div className="v-meta">
+              <span className="mono v-cid">{object.cid.slice(0, 14)}…</span>
+              <span className="v-sub">{humanSize(object.size)} · текущая</span>
+            </div>
+          </div>
+          {object.versions.map((v, i) => (
+            <div className="version-row" key={v.cid + i}>
+              <div className="v-tag">v{object.versions!.length - i}</div>
+              <div className="v-meta">
+                <span className="mono v-cid" title={v.cid}>{v.cid.slice(0, 14)}…</span>
+                <span className="v-sub">{humanSize(v.size)} · {relTime(v.lastModified)}</span>
+              </div>
+              <div className="v-actions">
+                <button
+                  className="icon-btn ghost"
+                  title="Скачать версию"
+                  onClick={() => onDownloadVersion(v.cid, name)}
+                >
+                  <IconDownload size={15} />
+                </button>
+                <button className="mini-btn" onClick={() => onRestore(object.key, v.cid)}>
+                  Восстановить
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="drawer-actions">
         <button className="btn primary" onClick={() => onDownload(object)}>
           <IconDownload size={16} /> Скачать
+        </button>
+        <button className="btn ghost" onClick={() => onShare(object)} disabled={!object.cid}>
+          <IconLink size={16} /> Поделиться
         </button>
         <button className="btn ghost" onClick={() => onCopy(object.cid)} disabled={!object.cid}>
           <IconCopy size={16} /> CID

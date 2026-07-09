@@ -131,6 +131,25 @@ export async function seedIfEmpty(): Promise<void> {
     buckets.push({ name, createdAt: now - 60 * day });
     const objs: S3Object[] = [];
     for (const s of seeds) {
+      const base = s.key.split("/").pop() ?? s.key;
+      // Give a couple of manifest/readme objects a version history for demo.
+      const versioned = base === "manifest.json" || base === "README.md";
+      const versions = versioned
+        ? [
+            {
+              cid: await demoCidFromString(`${name}/${s.key}:v2`),
+              size: Math.round(s.size * 0.92),
+              contentType: guessType(s.key),
+              lastModified: now - (s.daysAgo + 9) * day,
+            },
+            {
+              cid: await demoCidFromString(`${name}/${s.key}:v1`),
+              size: Math.round(s.size * 0.8),
+              contentType: guessType(s.key),
+              lastModified: now - (s.daysAgo + 25) * day,
+            },
+          ]
+        : undefined;
       objs.push({
         key: s.key,
         cid: await demoCidFromString(`${name}/${s.key}:${s.size}`),
@@ -138,6 +157,7 @@ export async function seedIfEmpty(): Promise<void> {
         contentType: guessType(s.key),
         lastModified: now - s.daysAgo * day,
         pinned: true,
+        versions,
       });
     }
     saveObjects(name, objs);
