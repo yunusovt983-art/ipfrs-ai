@@ -5,6 +5,7 @@ import { humanSize } from "../lib/format";
 import {
   IconBucket,
   IconGear,
+  IconHistory,
   IconLogo,
   IconPlus,
   IconTrash,
@@ -22,6 +23,7 @@ interface Props {
   onCreate: (name: string) => void;
   onDelete: (name: string) => void;
   onPolicy: (name: string) => void;
+  onActivity: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
 }
@@ -45,6 +47,7 @@ export function Sidebar({
   onCreate,
   onDelete,
   onPolicy,
+  onActivity,
   onOpenSettings,
   onToggleTheme,
 }: Props) {
@@ -196,6 +199,9 @@ export function Sidebar({
           </div>
         </button>
         <div className="side-actions">
+          <button className="icon-btn" title="Журнал операций" onClick={onActivity}>
+            <IconHistory size={17} />
+          </button>
           <button className="icon-btn" title="Тема" onClick={onToggleTheme}>
             ◐
           </button>

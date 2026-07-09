@@ -137,6 +137,22 @@ export const IconPin = svg(
     <path d="M9 3h6l-1 6 3 3H7l3-3-1-6Z" />
   </>,
 );
+export const IconChart = svg(
+  <>
+    <path d="M4 20V4" />
+    <path d="M4 20h16" />
+    <rect x="7" y="12" width="3" height="5" />
+    <rect x="12" y="8" width="3" height="9" />
+    <rect x="17" y="5" width="3" height="12" />
+  </>,
+);
+export const IconHistory = svg(
+  <>
+    <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+    <path d="M3 4v4h4" />
+    <path d="M12 8v4l3 2" />
+  </>,
+);
 export const IconLogo = svg(
   <>
     <circle cx="12" cy="12" r="9" strokeWidth={1.6} />

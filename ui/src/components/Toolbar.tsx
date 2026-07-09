@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { humanSize } from "../lib/format";
 import {
+  IconChart,
   IconChevron,
   IconFolder,
   IconRefresh,
@@ -28,6 +29,7 @@ interface Props {
   onUpload: () => void;
   onNewFolder: (name: string) => void;
   onRefresh: () => void;
+  onMetrics: () => void;
   onView: (v: "list" | "grid") => void;
 }
 
@@ -51,6 +53,7 @@ export function Toolbar({
   onUpload,
   onNewFolder,
   onRefresh,
+  onMetrics,
   onView,
 }: Props) {
   const [newFolder, setNewFolder] = useState(false);
@@ -210,6 +213,10 @@ export function Toolbar({
             <IconFolder size={16} /> Папка
           </button>
         )}
+
+        <button className="icon-btn" title="Метрики бакета" onClick={onMetrics}>
+          <IconChart size={17} />
+        </button>
 
         <button className="icon-btn" title="Обновить" onClick={onRefresh}>
           <IconRefresh size={17} />

@@ -25,6 +25,13 @@ import {
 import { demoCid, IpfrsClient, buildQueryEmbedding } from "./lib/ipfrs";
 import { guessType } from "./lib/format";
 import { smartSearch, type Ranked } from "./lib/search";
+import {
+  clearActivity,
+  getActivity,
+  logActivity,
+  removeActivity,
+  type ActivityEntry,
+} from "./lib/activity";
 import { Sidebar } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { ObjectList } from "./components/ObjectList";
@@ -37,6 +44,8 @@ import { ProvenanceModal } from "./components/ProvenanceModal";
 import { ProvidersModal } from "./components/ProvidersModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { BucketPolicyModal } from "./components/BucketPolicyModal";
+import { BucketMetricsModal } from "./components/BucketMetricsModal";
+import { ActivityPanel } from "./components/ActivityPanel";
 import { Toasts } from "./components/Toasts";
 import { UploadOverlay } from "./components/UploadOverlay";
 
@@ -82,6 +91,8 @@ export function App() {
   const [proofObj, setProofObj] = useState<S3Object | null>(null);
   const [providersObj, setProvidersObj] = useState<S3Object | null>(null);
   const [policyBucket, setPolicyBucket] = useState<string | null>(null);
+  const [metricsBucket, setMetricsBucket] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityEntry[] | null>(null);
   const [hist, setHist] = useState<{ bucket: string; prefix: string }[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -192,6 +203,7 @@ export function App() {
       saveBuckets(next);
       saveObjects(clean, []);
       selectBucket(clean);
+      logActivity({ kind: "createBucket", bucket: clean, summary: `Создан бакет «${clean}»` });
       toast("success", `Бакет «${clean}» создан`);
     },
     [buckets, selectBucket, toast],
@@ -199,10 +211,23 @@ export function App() {
 
   const deleteBucket = useCallback(
     (name: string) => {
+      const removedObjs = listObjects(name);
+      const removedBucket = buckets.find((b) => b.name === name);
       const next = buckets.filter((b) => b.name !== name);
       setBuckets(next);
       saveBuckets(next);
       deleteBucketData(name);
+      logActivity({
+        kind: "deleteBucket",
+        bucket: name,
+        summary: `Удалён бакет «${name}» (${removedObjs.length} объектов)`,
+        undo: {
+          type: "restoreBucket",
+          bucket: name,
+          objects: removedObjs,
+          createdAt: removedBucket?.createdAt ?? Date.now(),
+        },
+      });
       if (currentBucket === name) {
         if (next.length) selectBucket(next[0].name);
         else {
@@ -326,7 +351,10 @@ export function App() {
           );
         }
       }
-      if (done) toast("success", `Загружено объектов: ${done}`);
+      if (done) {
+        logActivity({ kind: "upload", bucket, summary: `Загружено объектов: ${done}` });
+        toast("success", `Загружено объектов: ${done}`);
+      }
       setTimeout(() => setUploadItems([]), 3000);
     },
     [client, currentBucket, persist, prefix, settings, toast],
@@ -418,6 +446,7 @@ export function App() {
           pinned: false,
         },
       ]);
+      logActivity({ kind: "createFolder", bucket: currentBucket, summary: `Создана папка «${prefix}${clean}/»` });
       toast("success", `Папка «${clean}» создана`);
     },
     [currentBucket, persist, prefix, toast],
@@ -427,9 +456,18 @@ export function App() {
   const deleteObject = useCallback(
     (key: string) => {
       if (!currentBucket) return;
-      const objs = listObjects(currentBucket).filter((o) => o.key !== key);
-      persist(currentBucket, objs);
+      const all = listObjects(currentBucket);
+      const removed = all.find((o) => o.key === key);
+      persist(currentBucket, all.filter((o) => o.key !== key));
       if (selectedKey === key) setSelectedKey(null);
+      if (removed) {
+        logActivity({
+          kind: "delete",
+          bucket: currentBucket,
+          summary: `Удалён объект «${key}»`,
+          undo: { type: "restoreObjects", bucket: currentBucket, objects: [removed] },
+        });
+      }
       toast("info", "Объект удалён");
     },
     [currentBucket, persist, selectedKey, toast],
@@ -452,6 +490,11 @@ export function App() {
         o.key === obj.key ? { ...o, pinned: next } : o,
       );
       persist(currentBucket, objs);
+      logActivity({
+        kind: "pin",
+        bucket: currentBucket,
+        summary: `${next ? "Закреплён" : "Откреплён"} «${obj.key}»`,
+      });
       toast(next ? "success" : "info", next ? "Закреплено (pinned)" : "Откреплено");
     },
     [client, currentBucket, persist, settings.mode, toast],
@@ -522,6 +565,7 @@ export function App() {
       const next = [...objs];
       next[idx] = restored;
       persist(currentBucket, next);
+      logActivity({ kind: "restore", bucket: currentBucket, summary: `Восстановлена версия «${key}»` });
       toast("success", "Версия восстановлена");
     },
     [currentBucket, persist, toast],
@@ -562,6 +606,12 @@ export function App() {
       const next = objs.map((o) => (o.key === oldKey ? { ...o, key: newKey } : o));
       persist(currentBucket, next);
       if (selectedKey === oldKey) setSelectedKey(newKey);
+      logActivity({
+        kind: "rename",
+        bucket: currentBucket,
+        summary: `«${oldKey}» → «${newKey}»`,
+        undo: { type: "renameBack", bucket: currentBucket, fromKey: newKey, toKey: oldKey },
+      });
       toast("success", `Переименовано: ${newBaseTrimmed}`);
     },
     [currentBucket, persist, selectedKey, toast],
@@ -586,8 +636,15 @@ export function App() {
 
   const bulkDelete = useCallback(() => {
     if (!currentBucket || !selected.size) return;
-    const objs = listObjects(currentBucket).filter((o) => !selected.has(o.key));
-    persist(currentBucket, objs);
+    const all = listObjects(currentBucket);
+    const removed = all.filter((o) => selected.has(o.key));
+    persist(currentBucket, all.filter((o) => !selected.has(o.key)));
+    logActivity({
+      kind: "bulkDelete",
+      bucket: currentBucket,
+      summary: `Удалено объектов: ${removed.length}`,
+      undo: { type: "restoreObjects", bucket: currentBucket, objects: removed },
+    });
     toast("info", `Удалено объектов: ${selected.size}`);
     setSelected(new Set());
     setSelectedKey(null);
@@ -618,6 +675,81 @@ export function App() {
       setShowSettings(false);
     },
     [],
+  );
+
+  // ---- manifest export / import ----------------------------------------
+  const exportManifest = useCallback(
+    (bucket: string) => {
+      const data = {
+        format: "ipfrs-s3-manifest/1",
+        bucket,
+        exportedAt: new Date().toISOString(),
+        objects: listObjects(bucket),
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = `${bucket}-manifest.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast("success", "Манифест экспортирован");
+    },
+    [toast],
+  );
+
+  const importManifest = useCallback(
+    async (bucket: string, file: File) => {
+      try {
+        const data = JSON.parse(await file.text());
+        const incoming = (Array.isArray(data) ? data : data.objects) as S3Object[];
+        if (!Array.isArray(incoming)) throw new Error("нет массива objects");
+        const valid = incoming.filter(
+          (o) => o && typeof o.key === "string" && typeof o.cid === "string",
+        );
+        const map = new Map(listObjects(bucket).map((o) => [o.key, o]));
+        for (const o of valid) map.set(o.key, o);
+        persist(bucket, [...map.values()]);
+        logActivity({ kind: "import", bucket, summary: `Импортировано объектов: ${valid.length}` });
+        toast("success", `Импортировано объектов: ${valid.length}`);
+      } catch (e) {
+        toast("error", `Импорт не удался: ${(e as Error).message}`);
+      }
+    },
+    [persist, toast],
+  );
+
+  // ---- activity log / undo ---------------------------------------------
+  const undoActivity = useCallback(
+    (entry: ActivityEntry) => {
+      const u = entry.undo;
+      if (u) {
+        if (u.type === "restoreObjects") {
+          const map = new Map(listObjects(u.bucket).map((o) => [o.key, o]));
+          for (const o of u.objects) map.set(o.key, o);
+          persist(u.bucket, [...map.values()]);
+          toast("success", "Отменено: объекты восстановлены");
+        } else if (u.type === "renameBack") {
+          const objs = listObjects(u.bucket).map((o) =>
+            o.key === u.fromKey ? { ...o, key: u.toKey } : o,
+          );
+          persist(u.bucket, objs);
+          toast("success", "Отменено: имя восстановлено");
+        } else if (u.type === "restoreBucket") {
+          if (!buckets.some((b) => b.name === u.bucket)) {
+            const nb = [...buckets, { name: u.bucket, createdAt: u.createdAt }];
+            setBuckets(nb);
+            saveBuckets(nb);
+          }
+          saveObjects(u.bucket, u.objects);
+          if (u.bucket === currentBucket) setObjects(u.objects);
+          toast("success", "Отменено: бакет восстановлен");
+        }
+      }
+      removeActivity(entry.id);
+      setActivity(getActivity());
+    },
+    [buckets, currentBucket, persist, toast],
   );
 
   const toggleTheme = useCallback(() => {
@@ -652,6 +784,8 @@ export function App() {
         if (providersObj)  { setProvidersObj(null);   return; }
         if (showSettings)  { setShowSettings(false);  return; }
         if (policyBucket)  { setPolicyBucket(null);   return; }
+        if (metricsBucket) { setMetricsBucket(null);  return; }
+        if (activity)      { setActivity(null);       return; }
         if (selectedKey)   { setSelectedKey(null);    return; }
         if (query)         { setQuery("");            return; }
         return;
@@ -669,7 +803,7 @@ export function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [
     inspect, dagObj, proofObj, providersObj, showSettings, policyBucket,
-    selectedKey, query, selected, bulkDelete,
+    metricsBucket, activity, selectedKey, query, selected, bulkDelete,
   ]);
 
   // ---- derived ----------------------------------------------------------
@@ -737,6 +871,7 @@ export function App() {
         onCreate={createBucket}
         onDelete={deleteBucket}
         onPolicy={(name) => setPolicyBucket(name)}
+        onActivity={() => setActivity(getActivity())}
         onOpenSettings={() => setShowSettings(true)}
         onToggleTheme={toggleTheme}
       />
@@ -764,6 +899,7 @@ export function App() {
               onUpload={() => fileInput.current?.click()}
               onNewFolder={createFolder}
               onRefresh={refresh}
+              onMetrics={() => setMetricsBucket(currentBucket)}
               onView={setView}
             />
             {smart && query.trim() ? (
@@ -882,6 +1018,25 @@ export function App() {
           usedBytes={stats.size}
           onClose={() => setPolicyBucket(null)}
           onSaved={() => toast("success", "Политики сохранены")}
+        />
+      )}
+      {metricsBucket && (
+        <BucketMetricsModal
+          bucket={metricsBucket}
+          onClose={() => setMetricsBucket(null)}
+          onExport={exportManifest}
+          onImport={importManifest}
+        />
+      )}
+      {activity && (
+        <ActivityPanel
+          entries={activity}
+          onUndo={undoActivity}
+          onClear={() => {
+            clearActivity();
+            setActivity([]);
+          }}
+          onClose={() => setActivity(null)}
         />
       )}
 
