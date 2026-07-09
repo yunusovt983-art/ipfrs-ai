@@ -26,8 +26,10 @@ pub mod hamt;
 pub mod node;
 pub mod project;
 pub mod store;
+pub mod tiered;
 
 pub use error::{KError, KResult};
 pub use graph::{EntitySpec, KnowledgeGraph};
 pub use node::{EntityId, HypothesisStatus, KnowledgeNode};
 pub use store::{BlockStore, MemStore};
+pub use tiered::TieredStore;

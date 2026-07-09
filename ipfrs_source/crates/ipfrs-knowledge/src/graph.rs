@@ -36,8 +36,33 @@ impl<S: BlockStore> KnowledgeGraph<S> {
         Ok(Self { store, index, edges, prev: None })
     }
 
+    /// Reopen an existing graph from a persisted head CID. The head block (and the
+    /// index/edges roots it points at) must already be readable from `store` — for
+    /// a [`crate::TieredStore`], call `hydrate(head)` first.
+    pub fn open(store: S, head: &Cid) -> KResult<Self> {
+        let bytes = store.get(head).ok_or_else(|| KError::NotFound(format!("head {head}")))?;
+        let m = match Ipld::from_dag_cbor(bytes).map_err(KError::Core)? {
+            Ipld::Map(m) => m,
+            _ => return Err(KError::Decode("head not a map".into())),
+        };
+        let link = |k: &str| {
+            m.get(k)
+                .and_then(|v| v.as_link().copied())
+                .ok_or_else(|| KError::Decode(format!("head missing {k}")))
+        };
+        let index = link("index")?;
+        let edges = link("edges")?;
+        Ok(Self { store, index, edges, prev: Some(*head) })
+    }
+
     pub fn store(&self) -> &S {
         &self.store
+    }
+
+    /// Mutable access to the backing store — used to drive a tiered store's async
+    /// `flush`/`hydrate` between synchronous graph operations.
+    pub fn store_mut(&mut self) -> &mut S {
+        &mut self.store
     }
 
     fn put_node(&mut self, node: &KnowledgeNode) -> KResult<Cid> {

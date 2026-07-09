@@ -12,9 +12,14 @@ categories = ["data-structures", "science"]
 
 [dependencies]
 ipfrs-core = { workspace = true }
+ipfrs-storage = { workspace = true }
 
 serde = { workspace = true }
 thiserror = { workspace = true }
 petgraph = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
