@@ -198,6 +198,22 @@ async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> 
   }
 }
 
+/**
+ * Non-destructive migration: enrich already-seeded objects with demo DAG / proof /
+ * providers when they predate those fields (localStorage from an older build).
+ * Idempotent; never touches user-uploaded objects.
+ */
+export async function ensureDemoData(): Promise<void> {
+  for (const bucket of ["ml-models", "datasets"]) {
+    const objs = listObjects(bucket);
+    if (!objs.length) continue;
+    const key = (o: S3Object) => `${o.dag ? 1 : 0}${o.proof ? 1 : 0}${o.providers ? 1 : 0}`;
+    const before = objs.map(key).join();
+    await attachDemoIpfrs(bucket, objs);
+    if (objs.map(key).join() !== before) saveObjects(bucket, objs);
+  }
+}
+
 export async function seedIfEmpty(): Promise<void> {
   if (localStorage.getItem(BUCKETS_KEY)) return;
   const now = Date.now();

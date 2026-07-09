@@ -13,6 +13,7 @@ import {
   bucketStats,
   deleteBucketData,
   deriveEntries,
+  ensureDemoData,
   listBuckets,
   listObjects,
   saveBuckets,
@@ -92,6 +93,7 @@ export function App() {
     if (saved) document.documentElement.setAttribute("data-theme", saved);
     (async () => {
       await seedIfEmpty();
+      await ensureDemoData();
       const bs = listBuckets();
       setBuckets(bs);
       if (bs.length) selectBucket(bs[0].name);
