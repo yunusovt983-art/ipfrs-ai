@@ -4,7 +4,7 @@
 // live either on the IPFS gateway (live mode) or in an in-memory cache (demo /
 // freshly-uploaded), keyed by CID.
 
-import type { Bucket, BrowserEntry, S3Object } from "../types";
+import type { Bucket, BrowserEntry, DagNode, S3Object } from "../types";
 import { demoCidFromString } from "./ipfrs";
 import { guessType } from "./format";
 
@@ -122,6 +122,82 @@ const SEEDS: Record<string, Seed[]> = {
   ],
 };
 
+/** Attach illustrative DAG / proof / providers to a few seeded objects. */
+async function attachDemoIpfrs(bucket: string, objs: S3Object[]): Promise<void> {
+  const cid = (seed: string) => demoCidFromString(`${bucket}/${seed}`);
+  const find = (k: string) => objs.find((o) => o.key === k);
+
+  if (bucket === "ml-models") {
+    const model = find("llama/model.safetensors");
+    if (model) {
+      const shard = async (i: number, size: number): Promise<DagNode> => ({
+        cid: await cid(`shard-${i}`),
+        name: `shard-0000${i}.bin`,
+        size,
+        codec: "raw",
+        links: [],
+      });
+      model.dag = {
+        cid: model.cid,
+        name: "model.safetensors",
+        size: model.size,
+        codec: "dag-pb",
+        links: [
+          {
+            cid: await cid("index"),
+            name: "weight_index.json",
+            size: 48_210,
+            codec: "dag-cbor",
+            links: [],
+          },
+          await shard(0, 1_610_612_736),
+          await shard(1, 1_610_612_736),
+          {
+            ...(await shard(2, 1_610_039_296)),
+            links: [
+              { cid: await cid("shard-2-a"), name: "chunk-a", size: 805_306_368, codec: "raw", links: [] },
+              { cid: await cid("shard-2-b"), name: "chunk-b", size: 804_732_928, codec: "raw", links: [] },
+            ],
+          },
+        ],
+      };
+      model.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 11, role: "origin" },
+        { peer: "12D3KooW…Bob", region: "us-east", rttMs: 74 },
+        { peer: "12D3KooW…Carol", region: "ap-south", rttMs: 156 },
+        { peer: "12D3KooW…Dave", region: "eu-west", rttMs: 29 },
+      ];
+    }
+  }
+
+  if (bucket === "datasets") {
+    const man = find("manifest.json");
+    if (man) {
+      man.proof = {
+        verified: true,
+        engine: "TensorLogic · Datalog",
+        root: {
+          goal: "provenance(manifest.json)",
+          rule: "derived_from(D,S) :- transform(S,D), source(S).",
+          bindings: { D: "manifest.json", S: "wiki/train.parquet" },
+          sub: [
+            { goal: "transform(train.parquet, manifest.json)", rule: "факт в базе знаний" },
+            {
+              goal: "source(train.parquet)",
+              rule: "verified_source(X) :- hash_ok(X).",
+              sub: [{ goal: "hash_ok(train.parquet)", rule: "cid == hash(data) ✓" }],
+            },
+          ],
+        },
+      };
+      man.providers = [
+        { peer: "12D3KooW…Alice", region: "eu-central", rttMs: 13, role: "origin" },
+        { peer: "12D3KooW…Erin", region: "us-west", rttMs: 92 },
+      ];
+    }
+  }
+}
+
 export async function seedIfEmpty(): Promise<void> {
   if (localStorage.getItem(BUCKETS_KEY)) return;
   const now = Date.now();
@@ -160,6 +236,7 @@ export async function seedIfEmpty(): Promise<void> {
         versions,
       });
     }
+    await attachDemoIpfrs(name, objs);
     saveObjects(name, objs);
   }
   saveBuckets(buckets);

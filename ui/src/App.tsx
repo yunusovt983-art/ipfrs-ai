@@ -28,6 +28,9 @@ import { ObjectList } from "./components/ObjectList";
 import { SmartResults } from "./components/SmartResults";
 import { DetailsDrawer } from "./components/DetailsDrawer";
 import { BlockInspector } from "./components/BlockInspector";
+import { DagExplorer } from "./components/DagExplorer";
+import { ProvenanceModal } from "./components/ProvenanceModal";
+import { ProvidersModal } from "./components/ProvidersModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { Toasts } from "./components/Toasts";
 import { UploadOverlay } from "./components/UploadOverlay";
@@ -69,6 +72,9 @@ export function App() {
   const [smart, setSmart] = useState(false);
   const [ranked, setRanked] = useState<Ranked[]>([]);
   const [inspect, setInspect] = useState<S3Object | null>(null);
+  const [dagObj, setDagObj] = useState<S3Object | null>(null);
+  const [proofObj, setProofObj] = useState<S3Object | null>(null);
+  const [providersObj, setProvidersObj] = useState<S3Object | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const toastId = useRef(0);
 
@@ -558,6 +564,9 @@ export function App() {
           onShare={shareLink}
           onRestore={restoreVersion}
           onInspect={(o) => setInspect(o)}
+          onDag={(o) => setDagObj(o)}
+          onProof={(o) => setProofObj(o)}
+          onProviders={(o) => setProvidersObj(o)}
           onDelete={deleteObject}
         />
       )}
@@ -568,6 +577,32 @@ export function App() {
           mode={settings.mode}
           client={client}
           onClose={() => setInspect(null)}
+          onCopy={copyCid}
+        />
+      )}
+      {dagObj && (
+        <DagExplorer
+          object={dagObj}
+          mode={settings.mode}
+          client={client}
+          onClose={() => setDagObj(null)}
+          onCopy={copyCid}
+        />
+      )}
+      {proofObj && (
+        <ProvenanceModal
+          object={proofObj}
+          mode={settings.mode}
+          client={client}
+          onClose={() => setProofObj(null)}
+        />
+      )}
+      {providersObj && (
+        <ProvidersModal
+          object={providersObj}
+          mode={settings.mode}
+          client={client}
+          onClose={() => setProvidersObj(null)}
           onCopy={copyCid}
         />
       )}

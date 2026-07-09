@@ -4,11 +4,14 @@ import type { IpfrsClient } from "../lib/ipfrs";
 import { fileCategory, humanSize, relTime } from "../lib/format";
 import { PreviewPane } from "./PreviewPane";
 import {
+  IconCheck,
+  IconCode,
   IconCopy,
   IconClose,
   IconData,
   IconDownload,
   IconLink,
+  IconModel,
   IconTrash,
 } from "./icons";
 
@@ -23,6 +26,9 @@ interface Props {
   onShare: (o: S3Object) => void;
   onRestore: (key: string, versionCid: string) => void;
   onInspect: (o: S3Object) => void;
+  onDag: (o: S3Object) => void;
+  onProof: (o: S3Object) => void;
+  onProviders: (o: S3Object) => void;
   onDelete: (key: string) => void;
 }
 
@@ -37,6 +43,9 @@ export function DetailsDrawer({
   onShare,
   onRestore,
   onInspect,
+  onDag,
+  onProof,
+  onProviders,
   onDelete,
 }: Props) {
   const name = object.key.split("/").pop() || object.key;
@@ -120,15 +129,38 @@ export function DetailsDrawer({
         </div>
       ) : null}
 
+      <div className="ipfrs-tools">
+        <div className="tools-head">IPFRS</div>
+        <div className="tools-row">
+          <button className="tool-btn" onClick={() => onDag(object)} title="DAG-эксплорер">
+            <IconData size={16} /> DAG
+          </button>
+          <button
+            className={"tool-btn" + (object.proof ? " has" : "")}
+            onClick={() => onProof(object)}
+            title="Провенанс / proof"
+          >
+            <IconCheck size={16} /> Провенанс
+          </button>
+          <button
+            className={"tool-btn" + (object.providers ? " has" : "")}
+            onClick={() => onProviders(object)}
+            title="Провайдеры и пиры"
+          >
+            <IconModel size={16} /> Пиры
+          </button>
+          <button className="tool-btn" onClick={() => onInspect(object)} title="Инспектор блока">
+            <IconCode size={16} /> Блок
+          </button>
+        </div>
+      </div>
+
       <div className="drawer-actions">
         <button className="btn primary" onClick={() => onDownload(object)}>
           <IconDownload size={16} /> Скачать
         </button>
         <button className="btn ghost" onClick={() => onShare(object)} disabled={!object.cid}>
           <IconLink size={16} /> Поделиться
-        </button>
-        <button className="btn ghost" onClick={() => onInspect(object)}>
-          <IconData size={16} /> Блок
         </button>
         <button className="btn ghost" onClick={() => onCopy(object.cid)} disabled={!object.cid}>
           <IconCopy size={16} /> CID

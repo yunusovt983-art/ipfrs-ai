@@ -110,6 +110,35 @@ export class IpfrsClient {
     return out;
   }
 
+  /** Fetch a proof-carrying provenance tree for a CID (null if none). */
+  async getProof(cid: string): Promise<unknown | null> {
+    const res = await fetch(this.url(`/api/v0/logic/proof/${encodeURIComponent(cid)}`));
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`proof: HTTP ${res.status}`);
+    const j = await res.json();
+    return j.proof ?? null;
+  }
+
+  /** DHT providers of a CID (peer id strings). */
+  async findProviders(cid: string): Promise<string[]> {
+    const res = await fetch(this.url("/api/v0/dht/findprovs"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ arg: cid }),
+    });
+    if (!res.ok) throw new Error(`findprovs: HTTP ${res.status}`);
+    const j = await res.json();
+    return ((j.Responses as { ID: string }[]) ?? []).map((r) => r.ID);
+  }
+
+  /** Currently connected swarm peers (peer id strings). */
+  async swarmPeers(): Promise<string[]> {
+    const res = await fetch(this.url("/api/v0/swarm/peers"));
+    if (!res.ok) throw new Error(`peers: HTTP ${res.status}`);
+    const j = await res.json();
+    return ((j.Peers as { Peer: string }[]) ?? []).map((p) => p.Peer);
+  }
+
   async pin(cid: string): Promise<void> {
     // Best-effort; the gateway may not expose pin/add — ignore failures.
     await fetch(this.url(`/api/v0/pin/add?arg=${encodeURIComponent(cid)}`), {

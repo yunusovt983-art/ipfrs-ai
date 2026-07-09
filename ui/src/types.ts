@@ -17,6 +17,36 @@ export interface ObjectVersion {
   lastModified: number;
 }
 
+/** A node in a content-addressed DAG (demo seed or fetched). */
+export interface DagNode {
+  cid: string;
+  name?: string;
+  size: number;
+  codec: string;
+  links: DagNode[];
+}
+
+/** One step of a proof-carrying provenance tree. */
+export interface ProofStep {
+  goal: string;
+  rule?: string;
+  bindings?: Record<string, string>;
+  sub?: ProofStep[];
+}
+export interface Provenance {
+  verified: boolean;
+  engine: string;
+  root: ProofStep;
+}
+
+/** A peer that provides (holds) a CID. */
+export interface Provider {
+  peer: string;
+  region: string;
+  rttMs: number;
+  role?: string;
+}
+
 export interface S3Object {
   /** Full key within the bucket, e.g. "docs/spec/readme.md". */
   key: string;
@@ -29,6 +59,12 @@ export interface S3Object {
   pinned: boolean;
   /** Prior versions, newest first. Grows each time the key is re-uploaded. */
   versions?: ObjectVersion[];
+  /** Demo-seeded DAG structure (live mode fetches the real one). */
+  dag?: DagNode;
+  /** Demo-seeded provenance proof (live mode fetches from /logic/proof). */
+  proof?: Provenance;
+  /** Demo-seeded providers (live mode queries /dht/findprovs + /swarm/peers). */
+  providers?: Provider[];
 }
 
 /** A row in the object browser — either a virtual folder or a real object. */
