@@ -386,9 +386,31 @@ impl Gateway {
         // TODO: integrate OxiARC-based HTTP compression when available.
         // tower-http's CompressionLayer (C-backed brotli/deflate) is not used per COOLJAPAN policy.
         // compression_config.enable_gzip is preserved for future OxiARC wiring.
+
+        // CORS so browser UIs (e.g. the S3 console) can call the gateway.
+        // Allowed origins come from IPFRS_CORS_ORIGINS (comma-separated); when the
+        // var is unset the layer is permissive (allow-all) for local development.
+        let cors_config = match std::env::var("IPFRS_CORS_ORIGINS") {
+            Ok(v) if !v.trim().is_empty() => v
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .fold(crate::middleware::CorsConfig::default(), |c, o| {
+                    c.allow_origin(o)
+                }),
+            _ => crate::middleware::CorsConfig::permissive(),
+        };
+        let cors_state = crate::middleware::CorsState {
+            config: cors_config,
+        };
+
         router
             .with_state(self.state.clone())
             .layer(TraceLayer::new_for_http())
+            .layer(axum::middleware::from_fn_with_state(
+                cors_state,
+                crate::middleware::cors_middleware,
+            ))
     }
 
     /// Start the gateway server (HTTP or HTTPS based on configuration)
