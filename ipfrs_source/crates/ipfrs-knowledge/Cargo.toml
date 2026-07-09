@@ -1,0 +1,20 @@
+[package]
+name = "ipfrs-knowledge"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Typed, content-addressed knowledge graph over IPFRS IPLD — entities, concepts, relations, evidence with proof-carrying provenance"
+keywords = ["ipld", "knowledge-graph", "content-addressed", "hamt", "provenance"]
+categories = ["data-structures", "science"]
+
+[dependencies]
+ipfrs-core = { workspace = true }
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+petgraph = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }

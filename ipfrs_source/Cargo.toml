@@ -9,6 +9,7 @@ members = [
     "crates/ipfrs-semantic",
     "crates/ipfrs-interface",
     "crates/ipfrs-tensorlogic",
+    "crates/ipfrs-knowledge",
     "crates/ipfrs-cli",
     "crates/ipfrs-wasm",
     "crates/ipfrs-nodejs",
@@ -97,6 +98,7 @@ hyper = "1.10"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
+petgraph = "0.6"
 serde_json = "1.0"
 oxicode = { version = "0.2.4", features = ["derive", "serde"] }
 ciborium = "0.2"
@@ -206,6 +208,7 @@ ipfrs-core = { path = "crates/ipfrs-core", version = "0.2.0" }
 ipfrs-storage = { path = "crates/ipfrs-storage", version = "0.2.0" }
 ipfrs-network = { path = "crates/ipfrs-network", version = "0.2.0" }
 ipfrs-tensorlogic = { path = "crates/ipfrs-tensorlogic", version = "0.2.0" }
+ipfrs-knowledge = { path = "crates/ipfrs-knowledge", version = "0.2.0" }
 ipfrs-transport = { path = "crates/ipfrs-transport", version = "0.2.0" }
 ipfrs-semantic = { path = "crates/ipfrs-semantic", version = "0.2.0" }
 ipfrs-interface = { path = "crates/ipfrs-interface", version = "0.2.0" }
