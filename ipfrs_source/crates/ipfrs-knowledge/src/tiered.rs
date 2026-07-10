@@ -166,6 +166,40 @@ mod tests {
         assert!(pages_after.get("ada-lovelace.md").unwrap().contains("[[analytical-engine]]"));
     }
 
+    /// The same proof as above, but through a *real* on-disk sled database that is
+    /// fully closed and reopened as a separate instance — genuine persistence, not
+    /// a shared in-memory Arc.
+    #[tokio::test]
+    async fn graph_survives_real_disk_restart() {
+        use ipfrs_storage::{BlockStoreConfig, SledBlockStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blocks");
+
+        // --- session 1: flush to a real sled DB, then close it (drop) ------
+        let (head, pages_before) = {
+            let sled = SledBlockStore::new(BlockStoreConfig::testing().with_path(path.clone())).unwrap();
+            let cold: Arc<dyn BlockStoreTrait> = Arc::new(sled);
+            let mut kg = KnowledgeGraph::new(TieredStore::new(cold.clone())).unwrap();
+            let ada = kg.add_entity(spec("person", "Ada Lovelace")).unwrap();
+            let eng = kg.add_entity(spec("machine", "Analytical Engine")).unwrap();
+            kg.add_relation(ada, "designed", eng, 0.9, vec![]).unwrap();
+            let head = kg.commit().unwrap();
+            kg.store_mut().flush().await.unwrap();
+            cold.flush().await.unwrap(); // fsync sled to disk
+            (head, project::render(&kg).unwrap())
+        }; // kg + sled instance dropped here → DB closed
+
+        // --- session 2: a brand-new sled instance over the SAME path ------
+        let sled2 = SledBlockStore::new(BlockStoreConfig::testing().with_path(path.clone())).unwrap();
+        let cold2: Arc<dyn BlockStoreTrait> = Arc::new(sled2);
+        assert!(!cold2.is_empty(), "blocks recovered from disk");
+        let mut ts = TieredStore::new(cold2);
+        ts.hydrate(&head).await.unwrap();
+        let kg2 = KnowledgeGraph::open(ts, &head).unwrap();
+        assert_eq!(pages_before, project::render(&kg2).unwrap(), "survives real disk restart");
+    }
+
     #[tokio::test]
     async fn flush_is_idempotent() {
         let cold: Arc<dyn BlockStoreTrait> = Arc::new(MemoryBlockStore::new());
