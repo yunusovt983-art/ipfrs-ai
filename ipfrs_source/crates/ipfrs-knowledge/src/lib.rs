@@ -21,6 +21,7 @@
 //! ```
 
 pub mod error;
+pub mod gc;
 pub mod graph;
 pub mod hamt;
 pub mod node;
@@ -29,6 +30,7 @@ pub mod store;
 pub mod tiered;
 
 pub use error::{KError, KResult};
+pub use gc::{collect as gc_collect, GcReport};
 pub use graph::{EntitySpec, KnowledgeGraph};
 pub use node::{EntityId, HypothesisStatus, KnowledgeNode};
 pub use store::{BlockStore, MemStore};

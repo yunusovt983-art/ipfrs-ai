@@ -92,10 +92,23 @@ impl TieredStore {
 
 /// Recursively gather every CID link reachable inside an IPLD value.
 fn collect_links(ipld: &Ipld, out: &mut Vec<Cid>) {
+    collect_links_filtered(ipld, out, false)
+}
+
+/// Link walker with an option to skip the `prev` field of a `KnowledgeRoot` — used
+/// by GC to treat version history as detachable (see [`crate::gc`]).
+pub(crate) fn collect_links_filtered(ipld: &Ipld, out: &mut Vec<Cid>, skip_prev: bool) {
     match ipld {
         Ipld::Link(c) => out.push(c.0),
-        Ipld::Map(m) => m.values().for_each(|v| collect_links(v, out)),
-        Ipld::List(l) => l.iter().for_each(|v| collect_links(v, out)),
+        Ipld::Map(m) => {
+            for (k, v) in m {
+                if skip_prev && k == "prev" {
+                    continue;
+                }
+                collect_links_filtered(v, out, skip_prev);
+            }
+        }
+        Ipld::List(l) => l.iter().for_each(|v| collect_links_filtered(v, out, skip_prev)),
         _ => {}
     }
 }
