@@ -818,3 +818,4 @@ mark.hl {
 .know-foot { padding: 10px 20px 14px; font-size: 0.68rem; color: var(--faint); border-top: 1px solid var(--border); }
 .know-foot code, .know-md { font-family: var(--mono, ui-monospace, SFMono-Regular, monospace); }
 @media (max-width: 720px) { .know-body { grid-template-columns: 1fr; } .know-detail { border-top: 1px solid var(--border); } }
+.know-note.live { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }

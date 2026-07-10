@@ -1,14 +1,22 @@
 // KnowledgeModal — "поиск по знаниям" over a typed, content-addressed knowledge
 // graph. Mirrors the ipfrs-knowledge crate: the same char-trigram embedding,
 // cosine top-k, and the deterministic wikilink Markdown projection.
+//
+// Two sources, one UI:
+//  · demo  — an on-device faithful graph (works on the static Pages deploy).
+//  · live  — queries the gateway's /api/v0/knowledge/* (seeded from the same demo
+//            graph on first open); results are backed by a real committed head CID.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ConnMode } from "../types";
+import type { IpfrsClient, KnowledgeHit } from "../lib/ipfrs";
 import {
   DEMO_GRAPH,
   entityId,
   indexGraph,
   renderMarkdown,
   searchIndex,
+  slug,
   type KEntity,
   type KHit,
 } from "../lib/knowledge";
@@ -16,14 +24,30 @@ import { IconClose, IconSearch } from "./icons";
 
 const KIND_GLYPH: Record<string, string> = { person: "🧑", machine: "⚙️", concept: "💡" };
 
-export function KnowledgeModal({ onClose }: { onClose: () => void }) {
+type Source = "demo" | "live";
+
+export function KnowledgeModal({
+  mode,
+  client,
+  onClose,
+}: {
+  mode: ConnMode;
+  client: IpfrsClient;
+  onClose: () => void;
+}) {
   const g = DEMO_GRAPH;
   const index = useMemo(() => indexGraph(g), [g]);
   const [query, setQuery] = useState("lovelace");
   const [selected, setSelected] = useState<KEntity | null>(g.entities[0]);
   const [ids, setIds] = useState<Record<string, string>>({});
 
-  // Compute real EntityIds (sha256(kind\0name)) once, like EntityId::of.
+  const [source, setSource] = useState<Source>("demo");
+  const [liveHits, setLiveHits] = useState<KnowledgeHit[] | null>(null);
+  const [liveProjection, setLiveProjection] = useState<Record<string, string> | null>(null);
+  const [status, setStatus] = useState("");
+  const debounce = useRef<number | undefined>(undefined);
+
+  // Real EntityIds (sha256(kind\0name)) for the demo projection, once.
   useEffect(() => {
     let live = true;
     (async () => {
@@ -37,12 +61,92 @@ export function KnowledgeModal({ onClose }: { onClose: () => void }) {
     };
   }, [g]);
 
-  const hits: KHit[] = useMemo(
+  // In live mode: probe the gateway, seed the demo graph if empty, capture the head.
+  useEffect(() => {
+    if (mode !== "live") return;
+    let alive = true;
+    (async () => {
+      setStatus("Проверка шлюза…");
+      const stats = await client.knowledgeStats();
+      if (!alive) return;
+      if (!stats) {
+        setStatus("Шлюз без знаний — демо");
+        setSource("demo");
+        return;
+      }
+      if (stats.entities === 0) {
+        setStatus("Посев демо-графа…");
+        for (const e of g.entities) {
+          await client.knowledgeAddEntity(e.kind, e.name, e.aliases, e.attrs);
+        }
+        for (const r of g.relations) {
+          const obj = g.entities.find((e) => e.name === r.object);
+          const subj = g.entities.find((e) => e.name === r.subject);
+          if (subj && obj) {
+            await client.knowledgeAddRelation(subj.kind, subj.name, r.predicate, obj.kind, obj.name, r.weight);
+          }
+        }
+      }
+      const h = await client.knowledgeCommit();
+      if (!alive) return;
+      setSource("live");
+      setStatus(h ? `live · head ${h.slice(0, 12)}…` : "live");
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [mode, client, g]);
+
+  // Live search (debounced) once we're in live mode.
+  useEffect(() => {
+    if (source !== "live") return;
+    window.clearTimeout(debounce.current);
+    debounce.current = window.setTimeout(async () => {
+      const hits = await client.knowledgeSearch(query.trim() || " ", 8);
+      setLiveHits(hits ?? []);
+    }, 180);
+    return () => window.clearTimeout(debounce.current);
+  }, [source, query, client]);
+
+  const demoHits: KHit[] = useMemo(
     () => (query.trim() ? searchIndex(index, query, 8) : []),
     [index, query],
   );
 
-  const md = selected ? renderMarkdown(g, selected, ids[selected.name] ?? "…") : "";
+  async function pickEntity(name: string, kind: string) {
+    const demo = g.entities.find((e) => e.name === name);
+    if (demo) setSelected(demo);
+    if (source === "live" && !liveProjection) {
+      setLiveProjection(await client.knowledgeProjection());
+    }
+    void kind;
+  }
+
+  // The projection text for the selected entity.
+  const md = useMemo(() => {
+    if (!selected) return "";
+    if (source === "live" && liveProjection) {
+      return liveProjection[`${slug(selected.name)}.md`] ?? renderMarkdown(g, selected, ids[selected.name] ?? "…");
+    }
+    return renderMarkdown(g, selected, ids[selected.name] ?? "…");
+  }, [selected, source, liveProjection, g, ids]);
+
+  const rows =
+    source === "live"
+      ? (liveHits ?? []).map((h) => ({
+          title: h.title || "(без имени)",
+          subtitle: h.kind,
+          score: h.score,
+          kind: h.kind,
+          entityName: h.kind === "entity" ? h.title : null,
+        }))
+      : demoHits.map((h) => ({
+          title: h.title,
+          subtitle: h.subtitle,
+          score: h.score,
+          kind: h.kind,
+          entityName: h.entity ? h.entity.name : null,
+        }));
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -71,23 +175,22 @@ export function KnowledgeModal({ onClose }: { onClose: () => void }) {
             placeholder="lovelace · algorithm · babbage · memoir …"
             onChange={(e) => setQuery(e.target.value)}
           />
-          <span className="know-note">demo · on-device</span>
+          <span className={"know-note" + (source === "live" ? " live" : "")}>
+            {source === "live" ? status || "live" : "demo · on-device"}
+          </span>
         </div>
 
         <div className="know-body">
           <div className="know-results">
-            {hits.length === 0 && <div className="know-empty">Введите запрос</div>}
-            {hits.map((h, i) => (
+            {rows.length === 0 && <div className="know-empty">Введите запрос</div>}
+            {rows.map((h, i) => (
               <button
                 key={i}
-                className={
-                  "know-hit" +
-                  (h.entity && selected?.name === h.entity.name ? " active" : "")
-                }
-                onClick={() => h.entity && setSelected(h.entity)}
+                className={"know-hit" + (h.entityName && selected?.name === h.entityName ? " active" : "")}
+                onClick={() => h.entityName && pickEntity(h.entityName, h.kind)}
               >
                 <span className="know-hit-glyph">
-                  {h.kind === "evidence" ? "📄" : KIND_GLYPH[h.subtitle] ?? "•"}
+                  {h.kind === "evidence" ? "📄" : KIND_GLYPH[h.subtitle] ?? KIND_GLYPH[h.kind] ?? "•"}
                 </span>
                 <span className="know-hit-main">
                   <span className="know-hit-title">{h.title}</span>
@@ -117,8 +220,10 @@ export function KnowledgeModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="know-foot">
-          Тот же embedding и проекция, что в крейте <code>ipfrs-knowledge</code>. В
-          live-режиме запрос уходит на шлюз; здесь — детерминированно on-device.
+          Тот же embedding и проекция, что в крейте <code>ipfrs-knowledge</code>.{" "}
+          {source === "live"
+            ? "Запрос идёт на шлюз /api/v0/knowledge/*; результаты подкреплены реальным head-CID."
+            : "В live-режиме запрос уходит на шлюз; здесь — детерминированно on-device."}
         </div>
       </div>
     </div>

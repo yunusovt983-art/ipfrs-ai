@@ -1032,7 +1032,13 @@ export function App() {
           onImport={importManifest}
         />
       )}
-      {showKnowledge && <KnowledgeModal onClose={() => setShowKnowledge(false)} />}
+      {showKnowledge && (
+        <KnowledgeModal
+          mode={settings.mode}
+          client={client}
+          onClose={() => setShowKnowledge(false)}
+        />
+      )}
       {activity && (
         <ActivityPanel
           entries={activity}

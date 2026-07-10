@@ -41,6 +41,13 @@ function normBase(base: string): string {
   return base.replace(/\/+$/, "");
 }
 
+export interface KnowledgeHit {
+  cid: string;
+  score: number;
+  kind: string;
+  title: string;
+}
+
 export class IpfrsClient {
   constructor(private base: string) {}
 
@@ -295,6 +302,97 @@ export class IpfrsClient {
       method: "POST",
     });
     if (!res.ok) throw new Error(`unpin: HTTP ${res.status}`);
+  }
+
+  // ---- knowledge graph (/api/v0/knowledge/*) ----------------------------
+
+  private async kPost<T>(path: string, body: unknown): Promise<T | null> {
+    try {
+      const res = await withTimeout(
+        fetch(this.url(path), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        10_000,
+      );
+      if (!res.ok) return null;
+      return (await res.json()) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  /** GET /api/v0/knowledge/stats — null if the feature is off or unreachable. */
+  async knowledgeStats(): Promise<{ entities: number; index: number } | null> {
+    try {
+      const res = await withTimeout(fetch(this.url("/api/v0/knowledge/stats")), 5_000);
+      if (!res.ok) return null;
+      return (await res.json()) as { entities: number; index: number };
+    } catch {
+      return null;
+    }
+  }
+
+  async knowledgeAddEntity(
+    kind: string,
+    name: string,
+    aliases: string[] = [],
+    attrs: Record<string, string> = {},
+  ): Promise<string | null> {
+    const r = await this.kPost<{ id: string }>("/api/v0/knowledge/entity", {
+      kind,
+      name,
+      aliases,
+      attrs,
+    });
+    return r?.id ?? null;
+  }
+
+  async knowledgeAddRelation(
+    subjectKind: string,
+    subjectName: string,
+    predicate: string,
+    objectKind: string,
+    objectName: string,
+    weight = 1.0,
+  ): Promise<string | null> {
+    const r = await this.kPost<{ cid: string }>("/api/v0/knowledge/relation", {
+      subject_kind: subjectKind,
+      subject_name: subjectName,
+      predicate,
+      object_kind: objectKind,
+      object_name: objectName,
+      weight,
+    });
+    return r?.cid ?? null;
+  }
+
+  /** POST /api/v0/knowledge/commit — persist a head, returns its CID. */
+  async knowledgeCommit(): Promise<string | null> {
+    const r = await this.kPost<{ head: string }>("/api/v0/knowledge/commit", {});
+    return r?.head ?? null;
+  }
+
+  /** POST /api/v0/knowledge/search — cosine top-k over the gateway's index. */
+  async knowledgeSearch(query: string, k = 8): Promise<KnowledgeHit[] | null> {
+    const r = await this.kPost<{ results: KnowledgeHit[] }>("/api/v0/knowledge/search", {
+      query,
+      k,
+    });
+    return r?.results ?? null;
+  }
+
+  /** GET /api/v0/knowledge/projection — { "<slug>.md": markdown }. */
+  async knowledgeProjection(): Promise<Record<string, string> | null> {
+    try {
+      const res = await withTimeout(fetch(this.url("/api/v0/knowledge/projection")), 5_000);
+      if (!res.ok) return null;
+      const j = (await res.json()) as { pages: Record<string, string> };
+      return j.pages;
+    } catch {
+      return null;
+    }
   }
 }
 
