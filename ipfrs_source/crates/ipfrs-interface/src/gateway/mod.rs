@@ -95,6 +95,7 @@ impl GatewayState {
     /// fresh graph is started.
     pub async fn with_knowledge(mut self) -> CoreResult<Self> {
         let head_path = self.storage_path.join("knowledge_head");
+        let pins_path = self.storage_path.join("knowledge_pins");
         let cold: Arc<dyn BlockStoreTrait> = self.store.clone();
         let mut ts = TieredStore::new(cold);
 
@@ -111,9 +112,12 @@ impl GatewayState {
                 ipfrs_core::Error::Internal(format!("Failed to init knowledge graph: {e}"))
             })?,
         };
+        let pins = knowledge::read_pins(&pins_path);
         self.knowledge = Some(knowledge::KnowledgeState {
             graph: Arc::new(tokio::sync::Mutex::new(graph)),
             head_path,
+            pins: Arc::new(tokio::sync::Mutex::new(pins)),
+            pins_path,
         });
         Ok(self)
     }
@@ -373,6 +377,10 @@ impl Gateway {
             .route("/api/v0/knowledge/search", post(api_knowledge_search))
             .route("/api/v0/knowledge/stats", get(api_knowledge_stats))
             .route("/api/v0/knowledge/projection", get(api_knowledge_projection))
+            .route("/api/v0/knowledge/pin", post(api_knowledge_pin))
+            .route("/api/v0/knowledge/unpin", post(api_knowledge_unpin))
+            .route("/api/v0/knowledge/pins", get(api_knowledge_pins))
+            .route("/api/v0/knowledge/gc", post(api_knowledge_gc))
             // Network endpoints
             .route("/api/v0/id", get(api_network_id))
             .route("/api/v0/swarm/peers", get(api_swarm_peers))

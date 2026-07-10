@@ -4,13 +4,14 @@
 //! gateway's sled block store through a `TieredStore` (hot MemStore + cold sled).
 //! Sync graph mutations run under a tokio mutex; `commit` flushes hot → cold.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{extract::State, Json};
 use ipfrs_core::Cid;
-use ipfrs_knowledge::{project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
+use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
+use ipfrs_storage::BlockStoreTrait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -18,11 +19,14 @@ use super::{AppError, GatewayState};
 
 type Graph = Arc<Mutex<KnowledgeGraph<TieredStore>>>;
 
-/// The gateway's knowledge feature: the graph plus a durable head pointer.
+/// The gateway's knowledge feature: the graph, a durable head pointer, and a
+/// durable pin set of extra heads to retain during GC.
 #[derive(Clone)]
 pub(crate) struct KnowledgeState {
     pub(crate) graph: Graph,
     pub(crate) head_path: PathBuf,
+    pub(crate) pins: Arc<Mutex<HashSet<Cid>>>,
+    pub(crate) pins_path: PathBuf,
 }
 
 /// Read a persisted head CID, if one was written by a previous run.
@@ -35,6 +39,21 @@ pub(crate) fn read_head(path: &Path) -> Option<Cid> {
 fn write_head(path: &Path, head: &Cid) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, head.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Read the persisted pin set (one CID per line); empty if absent.
+pub(crate) fn read_pins(path: &Path) -> HashSet<Cid> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.lines().filter_map(|l| l.trim().parse::<Cid>().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn write_pins(path: &Path, pins: &HashSet<Cid>) -> std::io::Result<()> {
+    let body = pins.iter().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, body)?;
     std::fs::rename(&tmp, path)
 }
 
@@ -122,6 +141,29 @@ pub(super) struct ProjectionResp {
     pages: BTreeMap<String, String>,
 }
 
+#[derive(Deserialize)]
+pub(super) struct CidReq {
+    cid: String,
+}
+
+#[derive(Serialize)]
+pub(super) struct PinsResp {
+    pins: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct GcReq {
+    #[serde(default)]
+    keep_history: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub(super) struct GcResp {
+    kept: usize,
+    deleted: usize,
+    roots: usize,
+}
+
 // ---- handlers ------------------------------------------------------------
 
 /// POST /api/v0/knowledge/entity — add or replace an entity.
@@ -202,6 +244,70 @@ pub(super) async fn api_knowledge_projection(
     let kg = graph(&state)?.lock().await;
     let pages = project::render(&kg).map_err(|e| AppError::Knowledge(e.to_string()))?;
     Ok(Json(ProjectionResp { pages }))
+}
+
+// ---- pins & garbage collection ------------------------------------------
+
+fn parse_cid(s: &str) -> Result<Cid, AppError> {
+    s.trim().parse::<Cid>().map_err(|_| AppError::InvalidCid(s.to_string()))
+}
+
+/// POST /api/v0/knowledge/pin — retain a head CID through GC.
+pub(super) async fn api_knowledge_pin(
+    State(state): State<GatewayState>,
+    Json(req): Json<CidReq>,
+) -> Result<Json<PinsResp>, AppError> {
+    let ks = kstate(&state)?;
+    let cid = parse_cid(&req.cid)?;
+    let mut pins = ks.pins.lock().await;
+    pins.insert(cid);
+    write_pins(&ks.pins_path, &pins).map_err(|e| AppError::Knowledge(format!("pins write: {e}")))?;
+    Ok(Json(PinsResp { pins: pins.iter().map(|c| c.to_string()).collect() }))
+}
+
+/// POST /api/v0/knowledge/unpin — release a pinned head CID.
+pub(super) async fn api_knowledge_unpin(
+    State(state): State<GatewayState>,
+    Json(req): Json<CidReq>,
+) -> Result<Json<PinsResp>, AppError> {
+    let ks = kstate(&state)?;
+    let cid = parse_cid(&req.cid)?;
+    let mut pins = ks.pins.lock().await;
+    pins.remove(&cid);
+    write_pins(&ks.pins_path, &pins).map_err(|e| AppError::Knowledge(format!("pins write: {e}")))?;
+    Ok(Json(PinsResp { pins: pins.iter().map(|c| c.to_string()).collect() }))
+}
+
+/// GET /api/v0/knowledge/pins — the current pin set.
+pub(super) async fn api_knowledge_pins(
+    State(state): State<GatewayState>,
+) -> Result<Json<PinsResp>, AppError> {
+    let ks = kstate(&state)?;
+    let pins = ks.pins.lock().await;
+    Ok(Json(PinsResp { pins: pins.iter().map(|c| c.to_string()).collect() }))
+}
+
+/// POST /api/v0/knowledge/gc — mark-and-sweep the cold tier, retaining the live
+/// head plus every pinned head. Holds the graph lock so no commit races the sweep.
+pub(super) async fn api_knowledge_gc(
+    State(state): State<GatewayState>,
+    Json(req): Json<GcReq>,
+) -> Result<Json<GcResp>, AppError> {
+    let ks = kstate(&state)?;
+    let _guard = ks.graph.lock().await; // serialize GC with mutations
+
+    // Roots = pinned heads ∪ the live head (never collect the current graph).
+    let mut roots: Vec<Cid> = ks.pins.lock().await.iter().copied().collect();
+    if let Some(head) = read_head(&ks.head_path) {
+        if !roots.contains(&head) {
+            roots.push(head);
+        }
+    }
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+    let report = gc::collect(&cold, &roots, req.keep_history.unwrap_or(true))
+        .await
+        .map_err(|e| AppError::Knowledge(e.to_string()))?;
+    Ok(Json(GcResp { kept: report.kept, deleted: report.deleted.len(), roots: roots.len() }))
 }
 
 #[cfg(test)]
@@ -298,6 +404,51 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(hits.0.results[0].title, "Ada Lovelace", "index survived restart");
+    }
+
+    /// A pinned head survives GC even when history is dropped; the live head is
+    /// always retained; the graph stays queryable afterwards.
+    #[tokio::test]
+    async fn gc_respects_pins_and_live_head() {
+        use ipfrs_storage::BlockStoreTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let st = state_at(dir.path().join("db")).await;
+
+        let _ = api_knowledge_add_entity(
+            State(st.clone()),
+            Json(EntityReq { kind: "person".into(), name: "Ada".into(), aliases: vec![], attrs: Default::default() }),
+        )
+        .await
+        .unwrap();
+        let head1 = api_knowledge_commit(State(st.clone())).await.unwrap().0.head;
+
+        // pin the v1 head, then supersede it with v2
+        let pins = api_knowledge_pin(State(st.clone()), Json(CidReq { cid: head1.clone() })).await.unwrap();
+        assert!(pins.0.pins.contains(&head1));
+        let _ = api_knowledge_add_entity(
+            State(st.clone()),
+            Json(EntityReq { kind: "person".into(), name: "Grace".into(), aliases: vec![], attrs: Default::default() }),
+        )
+        .await
+        .unwrap();
+        let _head2 = api_knowledge_commit(State(st.clone())).await.unwrap();
+
+        // GC dropping history: pinned head1 + live head2 are both retained.
+        let report = api_knowledge_gc(State(st.clone()), Json(GcReq { keep_history: Some(false) }))
+            .await
+            .unwrap();
+        assert!(report.0.roots >= 2, "pinned + live heads are roots");
+
+        // head1's block is still on the cold tier because it was pinned.
+        let h1: Cid = head1.parse().unwrap();
+        assert!(st.store.has(&h1).await.unwrap(), "pinned head survived GC");
+
+        // graph still fully queryable
+        let stats = api_knowledge_stats(State(st.clone())).await.unwrap();
+        assert_eq!(stats.0.entities, 2);
+        let hits = api_knowledge_search(State(st), Json(SearchReq { query: "grace".into(), k: Some(1) })).await.unwrap();
+        assert_eq!(hits.0.results[0].title, "Grace");
     }
 
     #[tokio::test]
