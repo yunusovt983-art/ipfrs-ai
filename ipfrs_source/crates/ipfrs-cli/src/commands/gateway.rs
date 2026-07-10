@@ -77,7 +77,11 @@ pub async fn run_gateway(
         eprintln!("TLS enabled - using secure connections");
     }
 
-    let gateway = Gateway::new(config).context("Failed to create gateway")?;
+    let gateway = Gateway::new(config)
+        .context("Failed to create gateway")?
+        .with_knowledge()
+        .await
+        .context("Failed to enable knowledge graph")?;
     gateway
         .start()
         .await

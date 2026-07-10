@@ -325,7 +325,7 @@ impl Gateway {
             // Prometheus metrics (public)
             .route("/metrics", get(metrics_endpoint))
             // IPFS gateway (public for now)
-            .route("/ipfs/:cid", get(get_content))
+            .route("/ipfs/{cid}", get(get_content))
             // Authentication endpoints (public)
             .route("/api/v0/auth/login", post(auth_handlers::login_handler))
             .route(
@@ -353,7 +353,7 @@ impl Gateway {
             .route("/api/v0/semantic/load", post(api_semantic_load))
             // TensorLogic endpoints
             .route("/api/v0/logic/term", post(api_logic_store_term))
-            .route("/api/v0/logic/term/:cid", get(api_logic_get_term))
+            .route("/api/v0/logic/term/{cid}", get(api_logic_get_term))
             .route("/api/v0/logic/predicate", post(api_logic_store_predicate))
             .route("/api/v0/logic/rule", post(api_logic_store_rule))
             .route("/api/v0/logic/stats", get(api_logic_stats))
@@ -362,7 +362,7 @@ impl Gateway {
             .route("/api/v0/logic/infer", post(api_logic_infer))
             .route("/api/v0/logic/prove", post(api_logic_prove))
             .route("/api/v0/logic/verify", post(api_logic_verify))
-            .route("/api/v0/logic/proof/:cid", get(api_logic_get_proof))
+            .route("/api/v0/logic/proof/{cid}", get(api_logic_get_proof))
             .route("/api/v0/logic/kb/stats", get(api_logic_kb_stats))
             .route("/api/v0/logic/kb/save", post(api_logic_kb_save))
             .route("/api/v0/logic/kb/load", post(api_logic_kb_load))
@@ -381,10 +381,10 @@ impl Gateway {
             .route("/api/v0/dht/findprovs", post(api_dht_findprovs))
             .route("/api/v0/dht/provide", post(api_dht_provide))
             // Streaming API (v1)
-            .route("/v1/stream/download/:cid", get(streaming::stream_download))
+            .route("/v1/stream/download/{cid}", get(streaming::stream_download))
             .route("/v1/stream/upload", post(streaming::stream_upload))
             .route(
-                "/v1/progress/:operation_id",
+                "/v1/progress/{operation_id}",
                 get(streaming::progress_stream),
             )
             // Batch API (v1)
@@ -392,9 +392,9 @@ impl Gateway {
             .route("/v1/block/batch/put", post(streaming::batch_put))
             .route("/v1/block/batch/has", post(streaming::batch_has))
             // Zero-Copy Tensor API (v1)
-            .route("/v1/tensor/:cid", get(tensor::get_tensor))
-            .route("/v1/tensor/:cid/info", get(tensor::get_tensor_info))
-            .route("/v1/tensor/:cid/arrow", get(tensor::get_tensor_arrow));
+            .route("/v1/tensor/{cid}", get(tensor::get_tensor))
+            .route("/v1/tensor/{cid}/info", get(tensor::get_tensor_info))
+            .route("/v1/tensor/{cid}/arrow", get(tensor::get_tensor_arrow));
 
         // Add protected auth endpoints if auth is enabled
         if self.state.auth.is_some() {
@@ -405,7 +405,7 @@ impl Gateway {
                     post(auth_handlers::update_permissions_handler),
                 )
                 .route(
-                    "/api/v0/auth/deactivate/:username",
+                    "/api/v0/auth/deactivate/{username}",
                     post(auth_handlers::deactivate_user_handler),
                 )
                 // API Key management endpoints
@@ -418,11 +418,11 @@ impl Gateway {
                     get(auth_handlers::list_api_keys_handler),
                 )
                 .route(
-                    "/api/v0/auth/keys/:key_id/revoke",
+                    "/api/v0/auth/keys/{key_id}/revoke",
                     post(auth_handlers::revoke_api_key_handler),
                 )
                 .route(
-                    "/api/v0/auth/keys/:key_id",
+                    "/api/v0/auth/keys/{key_id}",
                     axum::routing::delete(auth_handlers::delete_api_key_handler),
                 );
         }
@@ -524,11 +524,11 @@ impl Gateway {
             info!("  POST /api/v0/auth/register        - User registration");
             info!("  GET  /api/v0/auth/me              - Current user info");
             info!("  POST /api/v0/auth/permissions     - Update permissions (admin)");
-            info!("  POST /api/v0/auth/deactivate/:user - Deactivate user (admin)");
+            info!("  POST /api/v0/auth/deactivate/{{user}} - Deactivate user (admin)");
             info!("  POST /api/v0/auth/keys            - Create API key");
             info!("  GET  /api/v0/auth/keys            - List API keys");
-            info!("  POST /api/v0/auth/keys/:id/revoke - Revoke API key");
-            info!("  DEL  /api/v0/auth/keys/:id        - Delete API key");
+            info!("  POST /api/v0/auth/keys/{{id}}/revoke - Revoke API key");
+            info!("  DEL  /api/v0/auth/keys/{{id}}        - Delete API key");
         }
 
         info!("  POST /api/v0/version              - Get version");
@@ -560,9 +560,9 @@ impl Gateway {
         info!("  POST /api/v0/dht/provide          - Announce content");
 
         // Streaming API (v1)
-        info!("  GET  /v1/stream/download/:cid     - Stream download");
+        info!("  GET  /v1/stream/download/{{cid}}     - Stream download");
         info!("  POST /v1/stream/upload            - Stream upload");
-        info!("  GET  /v1/progress/:operation_id   - SSE progress");
+        info!("  GET  /v1/progress/{{operation_id}}   - SSE progress");
 
         // Batch API (v1)
         info!("  POST /v1/block/batch/get          - Batch get blocks");

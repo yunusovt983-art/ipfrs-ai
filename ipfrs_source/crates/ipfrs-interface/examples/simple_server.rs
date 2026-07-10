@@ -60,8 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n");
 
     // Create and start gateway with GraphQL enabled
-    let gateway = Gateway::new(config)?.with_graphql();
+    let gateway = Gateway::new(config)?.with_knowledge().await?.with_graphql();
 
+    println!("  Knowledge: /api/v0/knowledge/* enabled");
     gateway.start().await?;
 
     Ok(())
