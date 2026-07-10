@@ -46,6 +46,8 @@ export function KnowledgeModal({
   const [liveProjection, setLiveProjection] = useState<Record<string, string> | null>(null);
   const [status, setStatus] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [heads, setHeads] = useState<{ live: string | null; recent: string[]; retain: number } | null>(null);
+  const [gcReport, setGcReport] = useState<{ kept: number; deleted: number } | null>(null);
   const debounce = useRef<number | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -93,6 +95,7 @@ export function KnowledgeModal({
       if (!alive) return;
       setSource("live");
       setStatus(h ? `live · head ${h.slice(0, 12)}…` : "live");
+      setHeads(await client.knowledgeHeads());
     })();
     return () => {
       alive = false;
@@ -150,6 +153,19 @@ export function KnowledgeModal({
     setLiveProjection(null); // re-fetch on next selection
     setRefreshKey((k) => k + 1); // re-run live search against the new head
     setStatus(`live · head ${head.slice(0, 12)}…`);
+    setHeads(await client.knowledgeHeads());
+  }
+
+  async function runGc() {
+    setStatus("GC…");
+    const r = await client.knowledgeGc(false);
+    if (!r) {
+      setStatus("GC не удался");
+      return;
+    }
+    setGcReport({ kept: r.kept, deleted: r.deleted });
+    setStatus(`live · GC: kept ${r.kept}, deleted ${r.deleted}`);
+    setHeads(await client.knowledgeHeads());
   }
 
   // The projection text for the selected entity.
@@ -248,6 +264,33 @@ export function KnowledgeModal({
             )}
           </div>
         </div>
+
+        {source === "live" && heads && (
+          <div className="know-snapshots">
+            <span className="know-snap-label">
+              Снимки {heads.recent.length}/{heads.retain}
+            </span>
+            <div className="know-snap-chips">
+              {heads.recent.slice(0, 6).map((h) => (
+                <code
+                  key={h}
+                  className={"know-snap-chip" + (h === heads.live ? " live" : "")}
+                  title={h + (h === heads.live ? " (текущий head)" : "")}
+                >
+                  {h.slice(0, 8)}…
+                </code>
+              ))}
+            </div>
+            <button className="btn ghost" onClick={runGc} title="Сборка мусора: оставить пины + последние N heads">
+              GC
+            </button>
+            {gcReport && (
+              <span className="know-snap-gc">
+                kept {gcReport.kept} · deleted {gcReport.deleted}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="know-foot">
           <div className="know-foot-text">

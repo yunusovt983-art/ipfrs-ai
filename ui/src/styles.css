@@ -823,3 +823,10 @@ mark.hl {
 .know-foot-text { flex: 1; }
 .know-foot-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .know-foot-actions .btn { font-size: 0.72rem; padding: 5px 10px; white-space: nowrap; }
+.know-snapshots { display: flex; align-items: center; gap: 10px; padding: 8px 20px; border-top: 1px solid var(--border); font-size: 0.72rem; color: var(--faint); flex-wrap: wrap; }
+.know-snap-label { font-weight: 600; white-space: nowrap; }
+.know-snap-chips { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.know-snap-chip { font-size: 0.64rem; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; color: var(--faint); }
+.know-snap-chip.live { border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--accent); }
+.know-snapshots .btn { font-size: 0.7rem; padding: 3px 12px; }
+.know-snap-gc { color: var(--accent); white-space: nowrap; }

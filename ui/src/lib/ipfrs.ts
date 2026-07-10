@@ -383,6 +383,24 @@ export class IpfrsClient {
     return r?.results ?? null;
   }
 
+  /** GET /api/v0/knowledge/heads — live head + recent auto-pinned ring. */
+  async knowledgeHeads(): Promise<{ live: string | null; recent: string[]; retain: number } | null> {
+    try {
+      const res = await withTimeout(fetch(this.url("/api/v0/knowledge/heads")), 5_000);
+      if (!res.ok) return null;
+      return (await res.json()) as { live: string | null; recent: string[]; retain: number };
+    } catch {
+      return null;
+    }
+  }
+
+  /** POST /api/v0/knowledge/gc — mark-and-sweep; returns the report. */
+  async knowledgeGc(keepHistory: boolean): Promise<{ kept: number; deleted: number; roots: number } | null> {
+    return this.kPost<{ kept: number; deleted: number; roots: number }>("/api/v0/knowledge/gc", {
+      keep_history: keepHistory,
+    });
+  }
+
   /** GET /api/v0/knowledge/export — the whole graph as one CAR blob. */
   async knowledgeExport(): Promise<Blob | null> {
     try {
