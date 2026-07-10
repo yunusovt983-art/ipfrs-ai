@@ -28,6 +28,7 @@ pub mod node;
 pub mod project;
 pub mod store;
 pub mod tiered;
+pub mod vector;
 
 pub use error::{KError, KResult};
 pub use gc::{collect as gc_collect, GcReport};
@@ -35,3 +36,4 @@ pub use graph::{EntitySpec, KnowledgeGraph};
 pub use node::{EntityId, HypothesisStatus, KnowledgeNode};
 pub use store::{BlockStore, MemStore};
 pub use tiered::TieredStore;
+pub use vector::{embed, index_graph, VectorIndex};

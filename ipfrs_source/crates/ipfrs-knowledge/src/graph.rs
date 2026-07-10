@@ -81,6 +81,12 @@ impl<S: BlockStore> KnowledgeGraph<S> {
         self.get_node(cid)
     }
 
+    /// Store an arbitrary node (Evidence/Observation/Hypothesis/…) and return its
+    /// CID, so it can be referenced from relations or an external index.
+    pub fn put_node_public(&mut self, node: &KnowledgeNode) -> KResult<Cid> {
+        self.put_node(node)
+    }
+
     /// Add (or replace) an entity; returns its stable identity.
     pub fn add_entity(&mut self, spec: EntitySpec) -> KResult<EntityId> {
         let id = EntityId::of(&spec.kind, &spec.name);
