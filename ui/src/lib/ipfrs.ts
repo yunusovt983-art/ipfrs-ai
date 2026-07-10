@@ -412,6 +412,18 @@ export class IpfrsClient {
     }
   }
 
+  /** GET /api/v0/knowledge/diff — incremental CAR from `from` to `to`. */
+  async knowledgeDiff(to: string, from: string): Promise<Blob | null> {
+    try {
+      const q = `?to=${encodeURIComponent(to)}&from=${encodeURIComponent(from)}`;
+      const res = await fetch(this.url("/api/v0/knowledge/diff" + q));
+      if (!res.ok) return null;
+      return await res.blob();
+    } catch {
+      return null;
+    }
+  }
+
   /** POST /api/v0/knowledge/import (CAR bytes) — returns the adopted head CID. */
   async knowledgeImport(data: ArrayBuffer): Promise<string | null> {
     try {

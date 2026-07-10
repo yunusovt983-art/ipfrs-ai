@@ -143,6 +143,25 @@ export function KnowledgeModal({
     setStatus(`live · экспортировано ${(blob.size / 1024).toFixed(1)} KB`);
   }
 
+  async function exportDiff() {
+    const recent = heads?.recent ?? [];
+    if (recent.length < 2) return;
+    const [to, from] = [recent[0], recent[1]];
+    setStatus("Diff CAR…");
+    const blob = await client.knowledgeDiff(to, from);
+    if (!blob) {
+      setStatus("Diff не удался");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "knowledge-diff.car";
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`live · diff ${(blob.size / 1024).toFixed(1)} KB (${from.slice(0, 8)}…→${to.slice(0, 8)}…)`);
+  }
+
   async function importCar(file: File) {
     setStatus("Импорт CAR…");
     const head = await client.knowledgeImport(await file.arrayBuffer());
@@ -304,6 +323,15 @@ export function KnowledgeModal({
               <button className="btn ghost" onClick={exportCar} title="Скачать весь граф одним CAR-файлом">
                 ⬇ Export CAR
               </button>
+              {(heads?.recent.length ?? 0) >= 2 && (
+                <button
+                  className="btn ghost"
+                  onClick={exportDiff}
+                  title="Скачать инкрементальный CAR между двумя последними снимками"
+                >
+                  ⬇ Diff CAR
+                </button>
+              )}
               <button
                 className="btn ghost"
                 onClick={() => fileRef.current?.click()}
