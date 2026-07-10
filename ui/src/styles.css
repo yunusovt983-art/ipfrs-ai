@@ -819,3 +819,7 @@ mark.hl {
 .know-foot code, .know-md { font-family: var(--mono, ui-monospace, SFMono-Regular, monospace); }
 @media (max-width: 720px) { .know-body { grid-template-columns: 1fr; } .know-detail { border-top: 1px solid var(--border); } }
 .know-note.live { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.know-foot { display: flex; align-items: center; gap: 12px; }
+.know-foot-text { flex: 1; }
+.know-foot-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.know-foot-actions .btn { font-size: 0.72rem; padding: 5px 10px; white-space: nowrap; }

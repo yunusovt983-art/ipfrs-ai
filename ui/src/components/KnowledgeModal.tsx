@@ -45,7 +45,9 @@ export function KnowledgeModal({
   const [liveHits, setLiveHits] = useState<KnowledgeHit[] | null>(null);
   const [liveProjection, setLiveProjection] = useState<Record<string, string> | null>(null);
   const [status, setStatus] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
   const debounce = useRef<number | undefined>(undefined);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   // Real EntityIds (sha256(kind\0name)) for the demo projection, once.
   useEffect(() => {
@@ -106,7 +108,7 @@ export function KnowledgeModal({
       setLiveHits(hits ?? []);
     }, 180);
     return () => window.clearTimeout(debounce.current);
-  }, [source, query, client]);
+  }, [source, query, client, refreshKey]);
 
   const demoHits: KHit[] = useMemo(
     () => (query.trim() ? searchIndex(index, query, 8) : []),
@@ -120,6 +122,34 @@ export function KnowledgeModal({
       setLiveProjection(await client.knowledgeProjection());
     }
     void kind;
+  }
+
+  async function exportCar() {
+    setStatus("Экспорт CAR…");
+    const blob = await client.knowledgeExport();
+    if (!blob) {
+      setStatus("Экспорт не удался");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "knowledge.car";
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`live · экспортировано ${(blob.size / 1024).toFixed(1)} KB`);
+  }
+
+  async function importCar(file: File) {
+    setStatus("Импорт CAR…");
+    const head = await client.knowledgeImport(await file.arrayBuffer());
+    if (!head) {
+      setStatus("Импорт не удался");
+      return;
+    }
+    setLiveProjection(null); // re-fetch on next selection
+    setRefreshKey((k) => k + 1); // re-run live search against the new head
+    setStatus(`live · head ${head.slice(0, 12)}…`);
   }
 
   // The projection text for the selected entity.
@@ -220,10 +250,37 @@ export function KnowledgeModal({
         </div>
 
         <div className="know-foot">
-          Тот же embedding и проекция, что в крейте <code>ipfrs-knowledge</code>.{" "}
-          {source === "live"
-            ? "Запрос идёт на шлюз /api/v0/knowledge/*; результаты подкреплены реальным head-CID."
-            : "В live-режиме запрос уходит на шлюз; здесь — детерминированно on-device."}
+          <div className="know-foot-text">
+            Тот же embedding и проекция, что в крейте <code>ipfrs-knowledge</code>.{" "}
+            {source === "live"
+              ? "Запрос идёт на шлюз /api/v0/knowledge/*; результаты подкреплены реальным head-CID."
+              : "В live-режиме запрос уходит на шлюз; здесь — детерминированно on-device."}
+          </div>
+          {source === "live" && (
+            <div className="know-foot-actions">
+              <button className="btn ghost" onClick={exportCar} title="Скачать весь граф одним CAR-файлом">
+                ⬇ Export CAR
+              </button>
+              <button
+                className="btn ghost"
+                onClick={() => fileRef.current?.click()}
+                title="Загрузить граф из CAR-файла"
+              >
+                ⬆ Import CAR
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".car,application/vnd.ipld.car"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void importCar(f);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

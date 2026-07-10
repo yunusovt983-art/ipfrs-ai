@@ -383,6 +383,36 @@ export class IpfrsClient {
     return r?.results ?? null;
   }
 
+  /** GET /api/v0/knowledge/export — the whole graph as one CAR blob. */
+  async knowledgeExport(): Promise<Blob | null> {
+    try {
+      const res = await fetch(this.url("/api/v0/knowledge/export"));
+      if (!res.ok) return null;
+      return await res.blob();
+    } catch {
+      return null;
+    }
+  }
+
+  /** POST /api/v0/knowledge/import (CAR bytes) — returns the adopted head CID. */
+  async knowledgeImport(data: ArrayBuffer): Promise<string | null> {
+    try {
+      const res = await withTimeout(
+        fetch(this.url("/api/v0/knowledge/import"), {
+          method: "POST",
+          headers: { "content-type": "application/vnd.ipld.car" },
+          body: data,
+        }),
+        20_000,
+      );
+      if (!res.ok) return null;
+      const j = (await res.json()) as { head?: string };
+      return j.head ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** GET /api/v0/knowledge/projection — { "<slug>.md": markdown }. */
   async knowledgeProjection(): Promise<Record<string, string> | null> {
     try {
