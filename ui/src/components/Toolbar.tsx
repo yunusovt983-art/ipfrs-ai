@@ -30,6 +30,7 @@ interface Props {
   onNewFolder: (name: string) => void;
   onRefresh: () => void;
   onMetrics: () => void;
+  onKnowledge: () => void;
   onView: (v: "list" | "grid") => void;
 }
 
@@ -54,6 +55,7 @@ export function Toolbar({
   onNewFolder,
   onRefresh,
   onMetrics,
+  onKnowledge,
   onView,
 }: Props) {
   const [newFolder, setNewFolder] = useState(false);
@@ -216,6 +218,10 @@ export function Toolbar({
 
         <button className="icon-btn" title="Метрики бакета" onClick={onMetrics}>
           <IconChart size={17} />
+        </button>
+
+        <button className="icon-btn" title="Поиск по знаниям" onClick={onKnowledge}>
+          <span style={{ fontSize: 15, lineHeight: 1 }}>🧠</span>
         </button>
 
         <button className="icon-btn" title="Обновить" onClick={onRefresh}>

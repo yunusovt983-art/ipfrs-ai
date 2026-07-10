@@ -45,6 +45,7 @@ import { ProvidersModal } from "./components/ProvidersModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { BucketPolicyModal } from "./components/BucketPolicyModal";
 import { BucketMetricsModal } from "./components/BucketMetricsModal";
+import { KnowledgeModal } from "./components/KnowledgeModal";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { Toasts } from "./components/Toasts";
 import { UploadOverlay } from "./components/UploadOverlay";
@@ -79,6 +80,7 @@ export function App() {
   const [info, setInfo] = useState<GatewayInfo | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showKnowledge, setShowKnowledge] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
@@ -778,6 +780,7 @@ export function App() {
 
       // Escape — close modals / drawer / clear search in priority order
       if (e.key === "Escape") {
+        if (showKnowledge) { setShowKnowledge(false); return; }
         if (inspect)       { setInspect(null);       return; }
         if (dagObj)        { setDagObj(null);         return; }
         if (proofObj)      { setProofObj(null);       return; }
@@ -803,7 +806,7 @@ export function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [
     inspect, dagObj, proofObj, providersObj, showSettings, policyBucket,
-    metricsBucket, activity, selectedKey, query, selected, bulkDelete,
+    metricsBucket, activity, selectedKey, query, selected, bulkDelete, showKnowledge,
   ]);
 
   // ---- derived ----------------------------------------------------------
@@ -900,6 +903,7 @@ export function App() {
               onNewFolder={createFolder}
               onRefresh={refresh}
               onMetrics={() => setMetricsBucket(currentBucket)}
+              onKnowledge={() => setShowKnowledge(true)}
               onView={setView}
             />
             {smart && query.trim() ? (
@@ -1028,6 +1032,7 @@ export function App() {
           onImport={importManifest}
         />
       )}
+      {showKnowledge && <KnowledgeModal onClose={() => setShowKnowledge(false)} />}
       {activity && (
         <ActivityPanel
           entries={activity}
