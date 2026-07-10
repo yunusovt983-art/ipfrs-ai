@@ -381,6 +381,8 @@ impl Gateway {
             .route("/api/v0/knowledge/unpin", post(api_knowledge_unpin))
             .route("/api/v0/knowledge/pins", get(api_knowledge_pins))
             .route("/api/v0/knowledge/gc", post(api_knowledge_gc))
+            .route("/api/v0/knowledge/export", get(api_knowledge_export))
+            .route("/api/v0/knowledge/import", post(api_knowledge_import))
             // Network endpoints
             .route("/api/v0/id", get(api_network_id))
             .route("/api/v0/swarm/peers", get(api_swarm_peers))

@@ -6,14 +6,29 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use axum::{extract::State, Json};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::header,
+    response::{IntoResponse, Response},
+    Json,
+};
 use ipfrs_core::Cid;
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
-use ipfrs_storage::BlockStoreTrait;
+use ipfrs_storage::{BlockStoreTrait, CarReader, CarWriter};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+
+/// Unique temp-file sequence (avoids collisions between concurrent CAR requests).
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn temp_car_path(tag: &str) -> PathBuf {
+    let n = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("ipfrs-knowledge-{tag}-{}-{n}.car", std::process::id()))
+}
 
 use super::{AppError, GatewayState};
 
@@ -310,6 +325,83 @@ pub(super) async fn api_knowledge_gc(
     Ok(Json(GcResp { kept: report.kept, deleted: report.deleted.len(), roots: roots.len() }))
 }
 
+// ---- CAR export / import -------------------------------------------------
+
+/// GET /api/v0/knowledge/export.car — the whole graph (everything reachable from
+/// the head, history included) as one CAR file, root = head.
+pub(super) async fn api_knowledge_export(
+    State(state): State<GatewayState>,
+) -> Result<Response, AppError> {
+    let ks = kstate(&state)?;
+    let head = read_head(&ks.head_path)
+        .ok_or_else(|| AppError::NotFound("no committed knowledge head to export".to_string()))?;
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+
+    let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+    let path = temp_car_path("export");
+    let mut writer = CarWriter::create(&path, vec![head])
+        .await
+        .map_err(|e| AppError::Knowledge(format!("car create: {e}")))?;
+    for cid in &live {
+        if let Some(block) = cold.get(cid).await.map_err(AppError::Storage)? {
+            writer.write_block(&block).await.map_err(|e| AppError::Knowledge(format!("car write: {e}")))?;
+        }
+    }
+    writer.finish().await.map_err(|e| AppError::Knowledge(format!("car finish: {e}")))?;
+    let bytes = tokio::fs::read(&path).await.map_err(|e| AppError::Knowledge(format!("car read: {e}")))?;
+    let _ = tokio::fs::remove_file(&path).await;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/vnd.ipld.car"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"knowledge.car\"",
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// POST /api/v0/knowledge/import (body = raw CAR bytes) — load every block into the
+/// cold tier and adopt the CAR's first root as the new head.
+pub(super) async fn api_knowledge_import(
+    State(state): State<GatewayState>,
+    body: Bytes,
+) -> Result<Json<CommitResp>, AppError> {
+    let ks = kstate(&state)?;
+    let mut guard = ks.graph.lock().await; // serialize with mutations
+
+    let path = temp_car_path("import");
+    tokio::fs::write(&path, &body).await.map_err(|e| AppError::Knowledge(format!("car spill: {e}")))?;
+    let mut reader = CarReader::open(&path)
+        .await
+        .map_err(|e| AppError::Knowledge(format!("car open: {e}")))?;
+    let head = reader
+        .roots()
+        .first()
+        .copied()
+        .ok_or_else(|| AppError::Knowledge("CAR has no root".to_string()))?;
+
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+    let mut imported = 0usize;
+    while let Some(block) = reader.read_block().await.map_err(|e| AppError::Knowledge(format!("car block: {e}")))? {
+        cold.put(&block).await.map_err(AppError::Storage)?;
+        imported += 1;
+    }
+    let _ = tokio::fs::remove_file(&path).await;
+
+    // Adopt the imported head: hydrate + reopen the running graph, persist the head.
+    let mut ts = TieredStore::new(cold);
+    ts.hydrate(&head).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+    *guard = KnowledgeGraph::open(ts, &head).map_err(|e| AppError::Knowledge(e.to_string()))?;
+    write_head(&ks.head_path, &head).map_err(|e| AppError::Knowledge(format!("head write: {e}")))?;
+
+    let _ = imported;
+    Ok(Json(CommitResp { head: head.to_string() }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,6 +541,54 @@ mod tests {
         assert_eq!(stats.0.entities, 2);
         let hits = api_knowledge_search(State(st), Json(SearchReq { query: "grace".into(), k: Some(1) })).await.unwrap();
         assert_eq!(hits.0.results[0].title, "Grace");
+    }
+
+    /// The whole graph survives export → import into a fresh, independent gateway.
+    #[tokio::test]
+    async fn car_export_import_roundtrip() {
+        let dir1 = tempfile::tempdir().unwrap();
+        let src = state_at(dir1.path().join("db")).await;
+        for (kind, name) in [("person", "Ada Lovelace"), ("machine", "Analytical Engine")] {
+            let _ = api_knowledge_add_entity(
+                State(src.clone()),
+                Json(EntityReq { kind: kind.into(), name: name.into(), aliases: vec![], attrs: Default::default() }),
+            )
+            .await
+            .unwrap();
+        }
+        let _ = api_knowledge_add_relation(
+            State(src.clone()),
+            Json(RelationReq {
+                subject_kind: "person".into(),
+                subject_name: "Ada Lovelace".into(),
+                predicate: "wrote-notes-on".into(),
+                object_kind: "machine".into(),
+                object_name: "Analytical Engine".into(),
+                weight: 0.95,
+            }),
+        )
+        .await
+        .unwrap();
+        let _ = api_knowledge_commit(State(src.clone())).await.unwrap();
+
+        // export → CAR bytes
+        let resp = api_knowledge_export(State(src)).await.unwrap();
+        let car = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(car.len() > 32, "non-trivial CAR");
+
+        // import into a brand-new gateway over a different store
+        let dir2 = tempfile::tempdir().unwrap();
+        let dst = state_at(dir2.path().join("db")).await;
+        assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 0);
+        let head = api_knowledge_import(State(dst.clone()), car).await.unwrap();
+        assert!(!head.0.head.is_empty());
+
+        let stats = api_knowledge_stats(State(dst.clone())).await.unwrap();
+        assert_eq!(stats.0.entities, 2, "graph rebuilt from CAR");
+        let hits = api_knowledge_search(State(dst), Json(SearchReq { query: "lovelace".into(), k: Some(1) }))
+            .await
+            .unwrap();
+        assert_eq!(hits.0.results[0].title, "Ada Lovelace", "index rebuilt from CAR");
     }
 
     #[tokio::test]
