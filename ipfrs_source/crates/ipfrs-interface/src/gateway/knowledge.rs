@@ -270,6 +270,13 @@ pub(super) struct HeadsResp {
 }
 
 #[derive(Deserialize)]
+pub(super) struct DiffParams {
+    to: String,
+    #[serde(default)]
+    from: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct GcReq {
     #[serde(default)]
     keep_history: Option<bool>,
@@ -456,19 +463,15 @@ pub(super) async fn api_knowledge_gc(
 
 // ---- CAR export / import -------------------------------------------------
 
-/// GET /api/v0/knowledge/export — the whole graph (everything reachable from the
-/// head, history included) as one CARv1, root = head. Streamed block-by-block
-/// straight from the cold tier — no temp file, constant memory per block.
-pub(super) async fn api_knowledge_export(
-    State(state): State<GatewayState>,
+/// Build a streamed CARv1 response: header (root = `root`) then one frame per CID in
+/// `cids`, each block fetched from the cold tier on demand (constant memory).
+fn car_response(
+    cold: Arc<dyn BlockStoreTrait>,
+    root: Cid,
+    cids: HashSet<Cid>,
+    filename: &'static str,
 ) -> Result<Response, AppError> {
-    let ks = kstate(&state)?;
-    let head = read_head(&ks.head_path)
-        .ok_or_else(|| AppError::NotFound("no committed knowledge head to export".to_string()))?;
-    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
-
-    let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
-    let header_cbor = CarHeader::new(vec![head])
+    let header_cbor = CarHeader::new(vec![root])
         .to_cbor()
         .map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
 
@@ -479,7 +482,7 @@ pub(super) async fn api_knowledge_export(
         yield Ok::<Bytes, std::io::Error>(Bytes::from(h));
 
         // One frame per block: varint(cid_len + data_len) | cid | data
-        for cid in live {
+        for cid in cids {
             if let Ok(Some(block)) = cold.get(&cid).await {
                 let cid_bytes = cid.to_bytes();
                 let data = block.data();
@@ -491,14 +494,49 @@ pub(super) async fn api_knowledge_export(
         }
     };
 
+    let disposition = format!("attachment; filename=\"{filename}\"");
     Ok((
         [
-            (header::CONTENT_TYPE, "application/vnd.ipld.car"),
-            (header::CONTENT_DISPOSITION, "attachment; filename=\"knowledge.car\""),
+            (header::CONTENT_TYPE, "application/vnd.ipld.car".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
         ],
         Body::from_stream(stream),
     )
         .into_response())
+}
+
+/// GET /api/v0/knowledge/export — the whole graph (everything reachable from the
+/// head, history included) as one CARv1, root = head. Streamed block-by-block.
+pub(super) async fn api_knowledge_export(
+    State(state): State<GatewayState>,
+) -> Result<Response, AppError> {
+    let ks = kstate(&state)?;
+    let head = read_head(&ks.head_path)
+        .ok_or_else(|| AppError::NotFound("no committed knowledge head to export".to_string()))?;
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+    let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+    car_response(cold, head, live, "knowledge.car")
+}
+
+/// GET /api/v0/knowledge/diff?to=<cid>[&from=<cid>] — an incremental CARv1 with
+/// root = `to` containing only blocks reachable from `to` but not from `from`
+/// (a full export when `from` is omitted). Applied on top of a store that already
+/// has `from`, it reconstructs `to`.
+pub(super) async fn api_knowledge_diff(
+    State(state): State<GatewayState>,
+    axum::extract::Query(params): axum::extract::Query<DiffParams>,
+) -> Result<Response, AppError> {
+    kstate(&state)?;
+    let to: Cid = params.to.parse().map_err(|_| AppError::InvalidCid(params.to.clone()))?;
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+
+    let mut delta = gc::reachable(&cold, &[to], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+    if let Some(from_str) = &params.from {
+        let from: Cid = from_str.parse().map_err(|_| AppError::InvalidCid(from_str.clone()))?;
+        let base = gc::reachable(&cold, &[from], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+        delta.retain(|c| !base.contains(c));
+    }
+    car_response(cold, to, delta, "knowledge-diff.car")
 }
 
 /// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse the body as a
@@ -769,6 +807,67 @@ mod tests {
 
         // graph still fully intact
         assert_eq!(api_knowledge_stats(State(st)).await.unwrap().0.entities, RETAIN_HEADS + 2);
+    }
+
+    /// A base CAR (diff to=head1) plus an incremental CAR (diff from=head1 to=head2)
+    /// rebuild head2 in a fresh store; the delta is strictly smaller than the base.
+    #[tokio::test]
+    async fn incremental_diff_car() {
+        use axum::extract::Query;
+
+        async fn car_bytes(resp: Response) -> Vec<u8> {
+            axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()
+        }
+
+        let dir1 = tempfile::tempdir().unwrap();
+        let src = state_at(dir1.path().join("db")).await;
+        let _ = api_knowledge_add_entity(
+            State(src.clone()),
+            Json(EntityReq { kind: "person".into(), name: "Ada".into(), aliases: vec![], attrs: Default::default() }),
+        )
+        .await
+        .unwrap();
+        let head1 = api_knowledge_commit(State(src.clone())).await.unwrap().0.head;
+        let _ = api_knowledge_add_entity(
+            State(src.clone()),
+            Json(EntityReq { kind: "person".into(), name: "Grace".into(), aliases: vec![], attrs: Default::default() }),
+        )
+        .await
+        .unwrap();
+        let head2 = api_knowledge_commit(State(src.clone())).await.unwrap().0.head;
+
+        // base = full CAR at head1; delta = head2 minus head1; full2 = full head2
+        let base = car_bytes(
+            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head1.clone(), from: None }))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let full2 = car_bytes(
+            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head2.clone(), from: None }))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let delta = car_bytes(
+            api_knowledge_diff(State(src), Query(DiffParams { to: head2.clone(), from: Some(head1) }))
+                .await
+                .unwrap(),
+        )
+        .await;
+        // The delta is a strict subset of the full head2 export (base blocks omitted).
+        assert!(delta.len() < full2.len(), "delta ⊂ full ({} < {})", delta.len(), full2.len());
+
+        // fresh store: base gives head1 (1 entity), then delta upgrades to head2 (2)
+        let dir2 = tempfile::tempdir().unwrap();
+        let dst = state_at(dir2.path().join("db")).await;
+        let _ = api_knowledge_import(State(dst.clone()), Body::from(base)).await.unwrap();
+        assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 1);
+        let h = api_knowledge_import(State(dst.clone()), Body::from(delta)).await.unwrap();
+        assert_eq!(h.0.head, head2, "delta adopts head2");
+        assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 2);
+        let hits = api_knowledge_search(State(dst), Json(SearchReq { query: "grace".into(), k: Some(1) })).await.unwrap();
+        assert_eq!(hits.0.results[0].title, "Grace");
     }
 
     #[tokio::test]
