@@ -47,6 +47,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+    // Optional TLS from env (IPFRS_TLS_CERT / IPFRS_TLS_KEY) — needed for an
+    // HTTPS console (GitHub Pages is https, so it cannot call an http gateway).
+    let mut config = config;
+    if let (Ok(cert), Ok(key)) = (std::env::var("IPFRS_TLS_CERT"), std::env::var("IPFRS_TLS_KEY")) {
+        config.tls_config = Some(ipfrs_interface::tls::TlsConfig::new(cert, key));
+        println!("🔒 TLS enabled from IPFRS_TLS_CERT / IPFRS_TLS_KEY");
+    }
+
     // Validate configuration
     config.validate()?;
 

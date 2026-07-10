@@ -58,7 +58,7 @@ export function SettingsModal({ settings, onApply, onClose }: Props) {
           <p className="field-hint">
             {local.mode === "demo"
               ? "Объекты и CID хранятся в браузере (localStorage). Загрузки получают детерминированный псевдо-CID (SHA-256) и работают офлайн."
-              : "Загрузка идёт через POST /api/v0/add на шлюз IPFRS; CID — настоящий. Требуется запущенный gateway и разрешённый CORS."}
+              : "Запросы (в т.ч. поиск по знаниям) идут на шлюз IPFRS; CID — настоящие. Нужен запущенный gateway с разрешённым CORS. Консоль на https:// может обращаться только к https-шлюзу (mixed-content), поэтому включите TLS на ноде."}
           </p>
 
           <label className="field-label">Адрес шлюза</label>
@@ -68,7 +68,7 @@ export function SettingsModal({ settings, onApply, onClose }: Props) {
               value={local.gateway}
               disabled={local.mode !== "live"}
               onChange={(e) => setLocal({ ...local, gateway: e.target.value })}
-              placeholder="http://127.0.0.1:8080"
+              placeholder="https://your-node:8080"
             />
             <button
               className="btn ghost"

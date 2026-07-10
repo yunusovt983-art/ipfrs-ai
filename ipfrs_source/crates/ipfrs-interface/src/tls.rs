@@ -46,6 +46,10 @@ impl TlsConfig {
     ///
     /// This is an async method that loads the certificates and private key.
     pub async fn build_server_config(&self) -> TlsResult<RustlsConfig> {
+        // rustls 0.23 needs an explicit process-level crypto provider when more than
+        // one backend is linked (ring via libp2p + aws-lc-rs via axum-server), else
+        // it panics at handshake setup. Install aws-lc-rs once; ignore if already set.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         RustlsConfig::from_pem_file(&self.cert_path, &self.key_path)
             .await
             .map_err(|e| TlsError::ConfigError(format!("Failed to load TLS configuration: {}", e)))
