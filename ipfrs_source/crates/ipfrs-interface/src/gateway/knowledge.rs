@@ -34,14 +34,20 @@ use super::{AppError, GatewayState};
 
 type Graph = Arc<Mutex<KnowledgeGraph<TieredStore>>>;
 
-/// The gateway's knowledge feature: the graph, a durable head pointer, and a
-/// durable pin set of extra heads to retain during GC.
+/// How many most-recent commit heads are auto-pinned (retained through GC).
+pub(crate) const RETAIN_HEADS: usize = 10;
+
+/// The gateway's knowledge feature: the graph, a durable head pointer, a durable
+/// manual pin set, and a ring of the most-recent commit heads (auto-pinned).
 #[derive(Clone)]
 pub(crate) struct KnowledgeState {
     pub(crate) graph: Graph,
     pub(crate) head_path: PathBuf,
     pub(crate) pins: Arc<Mutex<HashSet<Cid>>>,
     pub(crate) pins_path: PathBuf,
+    /// Recent commit heads, oldest first, capped at [`RETAIN_HEADS`].
+    pub(crate) recent: Arc<Mutex<Vec<Cid>>>,
+    pub(crate) recent_path: PathBuf,
 }
 
 /// Read a persisted head CID, if one was written by a previous run.
@@ -67,6 +73,21 @@ pub(crate) fn read_pins(path: &Path) -> HashSet<Cid> {
 
 fn write_pins(path: &Path, pins: &HashSet<Cid>) -> std::io::Result<()> {
     let body = pins.iter().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, body)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Read the recent-heads ring (oldest first); empty if absent.
+pub(crate) fn read_recent(path: &Path) -> Vec<Cid> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.lines().filter_map(|l| l.trim().parse::<Cid>().ok()).collect())
+        .unwrap_or_default()
+}
+
+fn write_recent(path: &Path, recent: &[Cid]) -> std::io::Result<()> {
+    let body = recent.iter().map(|c| c.to_string()).collect::<Vec<_>>().join("\n");
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, body)?;
     std::fs::rename(&tmp, path)
@@ -166,6 +187,13 @@ pub(super) struct PinsResp {
     pins: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub(super) struct HeadsResp {
+    live: Option<String>,
+    recent: Vec<String>,
+    retain: usize,
+}
+
 #[derive(Deserialize)]
 pub(super) struct GcReq {
     #[serde(default)]
@@ -217,6 +245,19 @@ pub(super) async fn api_knowledge_commit(
     kg.store_mut().flush().await.map_err(|e| AppError::Knowledge(e.to_string()))?;
     // Durably record the head so a restart reopens this exact graph.
     write_head(&ks.head_path, &head).map_err(|e| AppError::Knowledge(format!("head write: {e}")))?;
+
+    // Auto-pin: keep the last RETAIN_HEADS commit heads (bounded ring, deduped).
+    {
+        let mut recent = ks.recent.lock().await;
+        recent.retain(|c| *c != head);
+        recent.push(head);
+        let overflow = recent.len().saturating_sub(RETAIN_HEADS);
+        if overflow > 0 {
+            recent.drain(0..overflow);
+        }
+        write_recent(&ks.recent_path, &recent)
+            .map_err(|e| AppError::Knowledge(format!("recent write: {e}")))?;
+    }
     Ok(Json(CommitResp { head: head.to_string() }))
 }
 
@@ -302,6 +343,19 @@ pub(super) async fn api_knowledge_pins(
     Ok(Json(PinsResp { pins: pins.iter().map(|c| c.to_string()).collect() }))
 }
 
+/// GET /api/v0/knowledge/heads — the live head and the recent auto-pinned ring
+/// (newest first).
+pub(super) async fn api_knowledge_heads(
+    State(state): State<GatewayState>,
+) -> Result<Json<HeadsResp>, AppError> {
+    let ks = kstate(&state)?;
+    let live = read_head(&ks.head_path).map(|c| c.to_string());
+    let mut recent: Vec<String> =
+        ks.recent.lock().await.iter().rev().map(|c| c.to_string()).collect();
+    recent.dedup();
+    Ok(Json(HeadsResp { live, recent, retain: RETAIN_HEADS }))
+}
+
 /// POST /api/v0/knowledge/gc — mark-and-sweep the cold tier, retaining the live
 /// head plus every pinned head. Holds the graph lock so no commit races the sweep.
 pub(super) async fn api_knowledge_gc(
@@ -311,13 +365,13 @@ pub(super) async fn api_knowledge_gc(
     let ks = kstate(&state)?;
     let _guard = ks.graph.lock().await; // serialize GC with mutations
 
-    // Roots = pinned heads ∪ the live head (never collect the current graph).
-    let mut roots: Vec<Cid> = ks.pins.lock().await.iter().copied().collect();
+    // Roots = manual pins ∪ recent auto-pinned heads ∪ the live head.
+    let mut set: HashSet<Cid> = ks.pins.lock().await.iter().copied().collect();
+    set.extend(ks.recent.lock().await.iter().copied());
     if let Some(head) = read_head(&ks.head_path) {
-        if !roots.contains(&head) {
-            roots.push(head);
-        }
+        set.insert(head);
     }
+    let roots: Vec<Cid> = set.into_iter().collect();
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
     let report = gc::collect(&cold, &roots, req.keep_history.unwrap_or(true))
         .await
@@ -589,6 +643,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(hits.0.results[0].title, "Ada Lovelace", "index rebuilt from CAR");
+    }
+
+    /// Each commit auto-pins into a bounded ring; GC retains the last RETAIN_HEADS
+    /// commits while an older, evicted head becomes collectable.
+    #[tokio::test]
+    async fn auto_pin_retains_recent_heads() {
+        use ipfrs_storage::BlockStoreTrait;
+
+        let dir = tempfile::tempdir().unwrap();
+        let st = state_at(dir.path().join("db")).await;
+
+        let mut heads = Vec::new();
+        for i in 0..(RETAIN_HEADS + 2) {
+            let _ = api_knowledge_add_entity(
+                State(st.clone()),
+                Json(EntityReq { kind: "n".into(), name: format!("e{i}"), aliases: vec![], attrs: Default::default() }),
+            )
+            .await
+            .unwrap();
+            heads.push(api_knowledge_commit(State(st.clone())).await.unwrap().0.head);
+        }
+
+        // ring holds exactly the last RETAIN_HEADS, newest first
+        let hs = api_knowledge_heads(State(st.clone())).await.unwrap().0;
+        assert_eq!(hs.recent.len(), RETAIN_HEADS);
+        assert_eq!(hs.recent[0], *heads.last().unwrap());
+        assert!(!hs.recent.contains(&heads[0]), "oldest head evicted from ring");
+
+        // GC dropping history keeps the ring; the evicted oldest head is collected.
+        let _ = api_knowledge_gc(State(st.clone()), Json(GcReq { keep_history: Some(false) }))
+            .await
+            .unwrap();
+        let oldest: Cid = heads[0].parse().unwrap();
+        let newest: Cid = heads.last().unwrap().parse().unwrap();
+        assert!(!st.store.has(&oldest).await.unwrap(), "evicted head collected");
+        assert!(st.store.has(&newest).await.unwrap(), "recent head retained");
+
+        // graph still fully intact
+        assert_eq!(api_knowledge_stats(State(st)).await.unwrap().0.entities, RETAIN_HEADS + 2);
     }
 
     #[tokio::test]

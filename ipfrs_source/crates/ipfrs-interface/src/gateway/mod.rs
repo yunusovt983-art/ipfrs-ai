@@ -113,11 +113,15 @@ impl GatewayState {
             })?,
         };
         let pins = knowledge::read_pins(&pins_path);
+        let recent_path = self.storage_path.join("knowledge_recent");
+        let recent = knowledge::read_recent(&recent_path);
         self.knowledge = Some(knowledge::KnowledgeState {
             graph: Arc::new(tokio::sync::Mutex::new(graph)),
             head_path,
             pins: Arc::new(tokio::sync::Mutex::new(pins)),
             pins_path,
+            recent: Arc::new(tokio::sync::Mutex::new(recent)),
+            recent_path,
         });
         Ok(self)
     }
@@ -380,6 +384,7 @@ impl Gateway {
             .route("/api/v0/knowledge/pin", post(api_knowledge_pin))
             .route("/api/v0/knowledge/unpin", post(api_knowledge_unpin))
             .route("/api/v0/knowledge/pins", get(api_knowledge_pins))
+            .route("/api/v0/knowledge/heads", get(api_knowledge_heads))
             .route("/api/v0/knowledge/gc", post(api_knowledge_gc))
             .route("/api/v0/knowledge/export", get(api_knowledge_export))
             .route("/api/v0/knowledge/import", post(api_knowledge_import))
