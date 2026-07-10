@@ -10,7 +10,8 @@ use axum::{
 };
 use ipfrs_core::Result as CoreResult;
 use ipfrs_semantic::{RouterConfig, SemanticRouter};
-use ipfrs_storage::{BlockStoreConfig, SledBlockStore};
+use ipfrs_knowledge::{KnowledgeGraph, TieredStore};
+use ipfrs_storage::{BlockStoreConfig, BlockStoreTrait, SledBlockStore};
 use ipfrs_tensorlogic::TensorLogicStore;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -29,6 +30,7 @@ pub struct GatewayState {
     pub(crate) store: Arc<SledBlockStore>,
     semantic: Option<Arc<SemanticRouter>>,
     tensorlogic: Option<Arc<TensorLogicStore<SledBlockStore>>>,
+    knowledge: Option<Arc<tokio::sync::Mutex<KnowledgeGraph<TieredStore>>>>,
     network: Option<Arc<tokio::sync::Mutex<ipfrs_network::NetworkNode>>>,
     graphql_schema: Option<IpfrsSchema>,
     pub(crate) auth: Option<AuthState>,
@@ -42,6 +44,7 @@ impl GatewayState {
             store: Arc::new(store),
             semantic: None,
             tensorlogic: None,
+            knowledge: None,
             network: None,
             graphql_schema: None,
             auth: None,
@@ -78,6 +81,16 @@ impl GatewayState {
     pub fn with_tensorlogic(mut self) -> CoreResult<Self> {
         let tensorlogic = TensorLogicStore::new(Arc::clone(&self.store))?;
         self.tensorlogic = Some(Arc::new(tensorlogic));
+        Ok(self)
+    }
+
+    /// Enable the knowledge graph (ipfrs-knowledge over the sled block store).
+    pub fn with_knowledge(mut self) -> CoreResult<Self> {
+        let cold: Arc<dyn BlockStoreTrait> = self.store.clone();
+        let graph = KnowledgeGraph::new(TieredStore::new(cold)).map_err(|e| {
+            ipfrs_core::Error::Internal(format!("Failed to init knowledge graph: {e}"))
+        })?;
+        self.knowledge = Some(Arc::new(tokio::sync::Mutex::new(graph)));
         Ok(self)
     }
 
@@ -329,6 +342,13 @@ impl Gateway {
             .route("/api/v0/logic/kb/stats", get(api_logic_kb_stats))
             .route("/api/v0/logic/kb/save", post(api_logic_kb_save))
             .route("/api/v0/logic/kb/load", post(api_logic_kb_load))
+            // Knowledge graph endpoints
+            .route("/api/v0/knowledge/entity", post(api_knowledge_add_entity))
+            .route("/api/v0/knowledge/relation", post(api_knowledge_add_relation))
+            .route("/api/v0/knowledge/commit", post(api_knowledge_commit))
+            .route("/api/v0/knowledge/search", post(api_knowledge_search))
+            .route("/api/v0/knowledge/stats", get(api_knowledge_stats))
+            .route("/api/v0/knowledge/projection", get(api_knowledge_projection))
             // Network endpoints
             .route("/api/v0/id", get(api_network_id))
             .route("/api/v0/swarm/peers", get(api_swarm_peers))
@@ -554,6 +574,12 @@ impl Gateway {
         Ok(self)
     }
 
+    /// Enable the knowledge graph
+    pub fn with_knowledge(mut self) -> CoreResult<Self> {
+        self.state = self.state.with_knowledge()?;
+        Ok(self)
+    }
+
     /// Enable networking capabilities
     pub fn with_network(mut self, network: ipfrs_network::NetworkNode) -> Self {
         self.state = self.state.with_network(network);
@@ -561,9 +587,11 @@ impl Gateway {
     }
 }
 
+pub(crate) mod knowledge;
 pub(crate) mod routes;
 
 #[allow(unused_imports)]
+use knowledge::*;
 use routes::*;
 
 // ============================================================================
@@ -581,6 +609,7 @@ enum AppError {
     FeatureDisabled(String),
     Semantic(String),
     Logic(String),
+    Knowledge(String),
     Network(String),
 }
 
@@ -625,6 +654,13 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Logic error: {}", msg),
+                )
+            }
+            AppError::Knowledge(msg) => {
+                error!("Knowledge error: {}", msg);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Knowledge error: {}", msg),
                 )
             }
             AppError::Network(msg) => {

@@ -24,6 +24,7 @@ ipfrs-core = { workspace = true }
 ipfrs-storage = { workspace = true }
 ipfrs-semantic = { workspace = true }
 ipfrs-tensorlogic = { workspace = true }
+ipfrs-knowledge = { workspace = true }
 ipfrs-network = { workspace = true }
 
 # Zero-copy data structures
