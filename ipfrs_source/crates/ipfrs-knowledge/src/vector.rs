@@ -86,6 +86,17 @@ impl VectorIndex {
         self.entries.push((target, emb));
     }
 
+    /// Drop any embedding stored under `target`.
+    pub fn remove(&mut self, target: &Cid) {
+        self.entries.retain(|(c, _)| c != target);
+    }
+
+    /// Insert or replace the embedding for `target` (keeps at most one per CID).
+    pub fn upsert(&mut self, target: Cid, emb: Embedding) {
+        self.remove(&target);
+        self.add(target, emb);
+    }
+
     /// Embed `text` and add it under `target`.
     pub fn add_text(&mut self, target: Cid, text: &str) {
         self.add(target, embed(text, self.dim));
@@ -208,7 +219,7 @@ pub fn node_text(node: &KnowledgeNode) -> Option<String> {
 
 /// Extract searchable text from a raw block: a knowledge node's [`node_text`], or a
 /// bare `Ipld::String` source document.
-fn block_text(bytes: &[u8]) -> Option<String> {
+pub(crate) fn block_text(bytes: &[u8]) -> Option<String> {
     if let Ok(node) = KnowledgeNode::decode(bytes) {
         return node_text(&node);
     }

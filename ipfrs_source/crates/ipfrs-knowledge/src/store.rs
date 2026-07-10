@@ -17,7 +17,7 @@ pub trait BlockStore {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct MemStore {
     blocks: HashMap<Cid, Vec<u8>>,
 }

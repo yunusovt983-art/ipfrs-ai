@@ -11,6 +11,7 @@ use crate::error::{KError, KResult};
 use crate::hamt;
 use crate::node::{EntityId, KnowledgeNode};
 use crate::store::BlockStore;
+use crate::vector::{self, VectorIndex};
 
 /// Input description of an entity for import.
 #[derive(Clone, Debug)]
@@ -26,6 +27,8 @@ pub struct KnowledgeGraph<S: BlockStore> {
     index: Cid, // HAMT EntityId → Entity node CID
     edges: Cid, // HAMT EntityId(subject) → CID of a list-block of Relation CIDs
     prev: Option<Cid>,
+    /// Semantic index, maintained incrementally and versioned with each commit.
+    vindex: VectorIndex,
 }
 
 impl<S: BlockStore> KnowledgeGraph<S> {
@@ -33,7 +36,7 @@ impl<S: BlockStore> KnowledgeGraph<S> {
     pub fn new(mut store: S) -> KResult<Self> {
         let index = hamt::empty(&mut store)?;
         let edges = hamt::empty(&mut store)?;
-        Ok(Self { store, index, edges, prev: None })
+        Ok(Self { store, index, edges, prev: None, vindex: VectorIndex::new(vector::DEFAULT_DIM) })
     }
 
     /// Reopen an existing graph from a persisted head CID. The head block (and the
@@ -52,7 +55,15 @@ impl<S: BlockStore> KnowledgeGraph<S> {
         };
         let index = link("index")?;
         let edges = link("edges")?;
-        Ok(Self { store, index, edges, prev: Some(*head) })
+        // The semantic index rides along in the head; older heads may lack it.
+        let vindex = match m.get("vindex").and_then(|v| v.as_link().copied()) {
+            Some(vc) => {
+                let vb = store.get(&vc).ok_or_else(|| KError::NotFound(format!("vindex {vc}")))?;
+                VectorIndex::decode(vb)?
+            }
+            None => VectorIndex::new(vector::DEFAULT_DIM),
+        };
+        Ok(Self { store, index, edges, prev: Some(*head), vindex })
     }
 
     pub fn store(&self) -> &S {
@@ -90,6 +101,7 @@ impl<S: BlockStore> KnowledgeGraph<S> {
     /// Add (or replace) an entity; returns its stable identity.
     pub fn add_entity(&mut self, spec: EntitySpec) -> KResult<EntityId> {
         let id = EntityId::of(&spec.kind, &spec.name);
+        let previous = self.entity_cid(&id)?; // stale embedding to evict, if any
         let node = KnowledgeNode::Entity {
             id,
             kind: spec.kind,
@@ -100,6 +112,14 @@ impl<S: BlockStore> KnowledgeGraph<S> {
         };
         let cid = self.put_node(&node)?;
         self.index = hamt::insert(&mut self.store, &self.index, id, cid)?;
+
+        // Incremental re-embedding: evict the old node's vector, embed the new one.
+        if let Some(old) = previous {
+            self.vindex.remove(&old);
+        }
+        if let Some(text) = vector::node_text(&node) {
+            self.vindex.upsert(cid, vector::embed(&text, self.vindex.dim()));
+        }
         Ok(id)
     }
 
@@ -129,6 +149,15 @@ impl<S: BlockStore> KnowledgeGraph<S> {
         let obj_cid = self
             .entity_cid(&object)?
             .ok_or_else(|| KError::Graph("object entity not found".into()))?;
+        // Incrementally embed each evidence's source text (keyed by evidence CID).
+        for ev in &evidence {
+            if let Ok(KnowledgeNode::Evidence { source, .. }) = self.get_node(ev) {
+                if let Some(text) = self.store.get(&source).and_then(vector::block_text) {
+                    self.vindex.upsert(*ev, vector::embed(&text, self.vindex.dim()));
+                }
+            }
+        }
+
         let rel = KnowledgeNode::Relation {
             subject: subj_cid,
             predicate: predicate.to_string(),
@@ -168,6 +197,17 @@ impl<S: BlockStore> KnowledgeGraph<S> {
             .collect()
     }
 
+    /// The maintained semantic index.
+    pub fn vindex(&self) -> &VectorIndex {
+        &self.vindex
+    }
+
+    /// Semantic search over the graph: returns `(node CID, score)`, best first.
+    /// Resolve CIDs with [`Self::get_node_public`].
+    pub fn search(&self, query: &str, k: usize) -> Vec<(Cid, f32)> {
+        self.vindex.search_text(query, k)
+    }
+
     /// All entity identities in the index.
     pub fn entity_ids(&self) -> KResult<Vec<EntityId>> {
         Ok(hamt::entries(&self.store, &self.index)?.into_iter().map(|(k, _)| k).collect())
@@ -176,11 +216,16 @@ impl<S: BlockStore> KnowledgeGraph<S> {
     /// Persist the current head as a `KnowledgeRoot` block; returns its CID and
     /// chains `prev` to the previous head.
     pub fn commit(&mut self) -> KResult<Cid> {
+        // Persist the semantic index and bind it into the head, so it versions with
+        // the graph and — being reachable from the head — survives GC like a pin.
+        let vcid = self.vindex.store(&mut self.store)?;
+
         let mut m: BTreeMap<String, Ipld> = BTreeMap::new();
         m.insert("@type".into(), Ipld::String("KnowledgeRoot".into()));
         m.insert("version".into(), Ipld::Integer(1));
         m.insert("index".into(), Ipld::link(self.index));
         m.insert("edges".into(), Ipld::link(self.edges));
+        m.insert("vindex".into(), Ipld::link(vcid));
         if let Some(p) = self.prev {
             m.insert("prev".into(), Ipld::link(p));
         }
@@ -256,6 +301,25 @@ mod tests {
         let h1 = kg.commit().unwrap();
         let h2 = kg.commit().unwrap();
         assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn semantic_index_versions_with_head_and_reopens() {
+        use crate::project;
+        let mut kg = KnowledgeGraph::new(MemStore::new()).unwrap();
+        let ada = kg.add_entity(spec("person", "Ada Lovelace")).unwrap();
+        kg.add_entity(spec("machine", "Analytical Engine")).unwrap();
+        let head = kg.commit().unwrap();
+
+        // maintained index answers queries in-session
+        let hit = kg.search("lovelace", 1)[0].0;
+        assert_eq!(hit, kg.entity_cid(&ada).unwrap().unwrap());
+
+        // reopen from head: the index rode along in the KnowledgeRoot
+        let kg2 = KnowledgeGraph::open(kg.store().clone(), &head).unwrap();
+        assert_eq!(kg2.vindex().len(), 2, "index restored from head");
+        assert_eq!(kg2.search("analytical", 1).len(), 1);
+        assert!(project::render(&kg2).unwrap().contains_key("ada-lovelace.md"));
     }
 
     #[test]
