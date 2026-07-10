@@ -17,7 +17,7 @@ use axum::{
 };
 use bytes::{Buf, BytesMut};
 use futures::{Stream, StreamExt};
-use ipfrs_core::{Block, Cid};
+use ipfrs_core::{Block, Cid, Ipld};
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
 use ipfrs_storage::{BlockStoreTrait, CarHeader};
 use serde::{Deserialize, Serialize};
@@ -277,6 +277,29 @@ pub(super) struct DiffParams {
 }
 
 #[derive(Deserialize)]
+pub(super) struct HistoryParams {
+    #[serde(default)]
+    head: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub(super) struct HistoryEntry {
+    cid: String,
+    index: String,
+    edges: String,
+    vindex: Option<String>,
+    prev: Option<String>,
+}
+
+#[derive(Serialize)]
+pub(super) struct HistoryResp {
+    head: String,
+    entries: Vec<HistoryEntry>,
+}
+
+#[derive(Deserialize)]
 pub(super) struct GcReq {
     #[serde(default)]
     keep_history: Option<bool>,
@@ -459,6 +482,48 @@ pub(super) async fn api_knowledge_gc(
         .await
         .map_err(|e| AppError::Knowledge(e.to_string()))?;
     Ok(Json(GcResp { kept: report.kept, deleted: report.deleted.len(), roots: roots.len() }))
+}
+
+/// GET /api/v0/knowledge/history?[head=<cid>][&limit=N] — the version log obtained
+/// by walking the `prev` chain of KnowledgeRoot blocks (newest first). Stops when a
+/// prev block is missing (e.g. collected by GC).
+pub(super) async fn api_knowledge_history(
+    State(state): State<GatewayState>,
+    axum::extract::Query(params): axum::extract::Query<HistoryParams>,
+) -> Result<Json<HistoryResp>, AppError> {
+    let ks = kstate(&state)?;
+    let head = match &params.head {
+        Some(s) => s.parse().map_err(|_| AppError::InvalidCid(s.clone()))?,
+        None => read_head(&ks.head_path).ok_or_else(|| AppError::NotFound("no committed head".to_string()))?,
+    };
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+    let limit = params.limit.unwrap_or(50).min(1000);
+
+    let mut entries = Vec::new();
+    let mut cur = Some(head);
+    while let Some(cid) = cur {
+        if entries.len() >= limit {
+            break;
+        }
+        let Some(block) = cold.get(&cid).await.map_err(AppError::Storage)? else {
+            break; // prev collected — end of retained history
+        };
+        let map = match Ipld::from_dag_cbor(block.data()).map_err(|e| AppError::Knowledge(e.to_string()))? {
+            Ipld::Map(m) => m,
+            _ => break,
+        };
+        let link = |k: &str| map.get(k).and_then(|v| v.as_link().copied());
+        let prev = link("prev");
+        entries.push(HistoryEntry {
+            cid: cid.to_string(),
+            index: link("index").map(|c| c.to_string()).unwrap_or_default(),
+            edges: link("edges").map(|c| c.to_string()).unwrap_or_default(),
+            vindex: link("vindex").map(|c| c.to_string()),
+            prev: prev.map(|c| c.to_string()),
+        });
+        cur = prev;
+    }
+    Ok(Json(HistoryResp { head: head.to_string(), entries }))
 }
 
 // ---- CAR export / import -------------------------------------------------
@@ -868,6 +933,38 @@ mod tests {
         assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 2);
         let hits = api_knowledge_search(State(dst), Json(SearchReq { query: "grace".into(), k: Some(1) })).await.unwrap();
         assert_eq!(hits.0.results[0].title, "Grace");
+    }
+
+    /// history walks the prev chain newest-first: 3 commits → 3 linked entries,
+    /// the oldest with prev = None.
+    #[tokio::test]
+    async fn history_walks_prev_chain() {
+        use axum::extract::Query;
+
+        let dir = tempfile::tempdir().unwrap();
+        let st = state_at(dir.path().join("db")).await;
+
+        let mut heads = Vec::new();
+        for name in ["Ada", "Grace", "Hopper"] {
+            let _ = api_knowledge_add_entity(
+                State(st.clone()),
+                Json(EntityReq { kind: "person".into(), name: name.into(), aliases: vec![], attrs: Default::default() }),
+            )
+            .await
+            .unwrap();
+            heads.push(api_knowledge_commit(State(st.clone())).await.unwrap().0.head);
+        }
+
+        let h = api_knowledge_history(State(st), Query(HistoryParams { head: None, limit: None }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(h.entries.len(), 3);
+        assert_eq!(h.entries[0].cid, heads[2], "newest first");
+        assert_eq!(h.entries[0].prev.as_deref(), Some(heads[1].as_str()));
+        assert_eq!(h.entries[1].prev.as_deref(), Some(heads[0].as_str()));
+        assert_eq!(h.entries[2].prev, None, "first commit has no prev");
+        assert!(h.entries.iter().all(|e| e.vindex.is_some() && !e.index.is_empty()));
     }
 
     #[tokio::test]

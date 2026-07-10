@@ -57,3 +57,4 @@ __pycache__/
 
 # TypeScript build info
 *.tsbuildinfo
+**/dev_data/
