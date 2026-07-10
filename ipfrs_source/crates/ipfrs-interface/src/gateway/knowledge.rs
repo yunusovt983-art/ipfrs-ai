@@ -15,6 +15,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use bytes::{Buf, BytesMut};
+use futures::{Stream, StreamExt};
 use ipfrs_core::{Block, Cid};
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
 use ipfrs_storage::{BlockStoreTrait, CarHeader};
@@ -39,17 +41,68 @@ fn encode_varint(mut v: u64) -> Vec<u8> {
     out
 }
 
-fn decode_varint(data: &[u8]) -> Result<(u64, usize), AppError> {
-    let mut result = 0u64;
-    let mut shift = 0u32;
-    for (i, &b) in data.iter().take(10).enumerate() {
-        result |= ((b & 0x7f) as u64) << shift;
-        if b & 0x80 == 0 {
-            return Ok((result, i + 1));
-        }
-        shift += 7;
+/// Incremental frame reader over a body byte-stream — pulls only as many chunks as
+/// needed for the next varint / block, so a CAR import never buffers the whole body.
+struct Framer<S> {
+    stream: S,
+    buf: BytesMut,
+    eof: bool,
+}
+
+impl<S, E> Framer<S>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+{
+    fn new(stream: S) -> Self {
+        Self { stream, buf: BytesMut::new(), eof: false }
     }
-    Err(AppError::Knowledge("truncated CAR varint".to_string()))
+
+    /// Pull chunks until at least `n` bytes are buffered; returns whether reached.
+    async fn ensure(&mut self, n: usize) -> Result<bool, AppError> {
+        while self.buf.len() < n && !self.eof {
+            match self.stream.next().await {
+                Some(Ok(chunk)) => self.buf.extend_from_slice(&chunk),
+                Some(Err(_)) => return Err(AppError::Knowledge("body stream error".to_string())),
+                None => self.eof = true,
+            }
+        }
+        Ok(self.buf.len() >= n)
+    }
+
+    /// Read one unsigned LEB128 varint, or `None` at a clean frame boundary EOF.
+    async fn read_varint(&mut self) -> Result<Option<u64>, AppError> {
+        let mut result = 0u64;
+        let mut shift = 0u32;
+        let mut i = 0usize;
+        loop {
+            if !self.ensure(i + 1).await? {
+                return if i == 0 {
+                    Ok(None) // clean end between frames
+                } else {
+                    Err(AppError::Knowledge("truncated CAR varint".to_string()))
+                };
+            }
+            let b = self.buf[i];
+            result |= ((b & 0x7f) as u64) << shift;
+            i += 1;
+            if b & 0x80 == 0 {
+                self.buf.advance(i);
+                return Ok(Some(result));
+            }
+            shift += 7;
+            if i >= 10 {
+                return Err(AppError::Knowledge("CAR varint too long".to_string()));
+            }
+        }
+    }
+
+    /// Read exactly `n` bytes as a zero-copy `Bytes`.
+    async fn read_bytes(&mut self, n: usize) -> Result<Bytes, AppError> {
+        if !self.ensure(n).await? {
+            return Err(AppError::Knowledge("truncated CAR frame".to_string()));
+        }
+        Ok(self.buf.split_to(n).freeze())
+    }
 }
 
 use super::{AppError, GatewayState};
@@ -448,39 +501,36 @@ pub(super) async fn api_knowledge_export(
         .into_response())
 }
 
-/// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse in memory, load
-/// every block into the cold tier, and adopt the CAR's first root as the new head.
+/// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse the body as a
+/// stream (constant memory, no whole-body buffering), load every block into the
+/// cold tier, and adopt the CAR's first root as the new head. Incremental CARs work
+/// too: missing base blocks are tolerated as long as the head resolves.
 pub(super) async fn api_knowledge_import(
     State(state): State<GatewayState>,
-    body: Bytes,
+    body: Body,
 ) -> Result<Json<CommitResp>, AppError> {
     let ks = kstate(&state)?;
     let mut guard = ks.graph.lock().await; // serialize with mutations
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
 
-    // Header: varint(len) | header CBOR
-    let mut pos = 0usize;
-    let (hlen, n) = decode_varint(&body[pos..])?;
-    pos += n;
-    let hend = pos + hlen as usize;
-    let car_header = CarHeader::from_cbor(body.get(pos..hend).ok_or_else(|| AppError::Knowledge("truncated CAR header".to_string()))?)
-        .map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
-    pos = hend;
+    let mut fr = Framer::new(body.into_data_stream());
+
+    // Header frame: varint(len) | header CBOR
+    let hlen = fr.read_varint().await?.ok_or_else(|| AppError::Knowledge("empty CAR".to_string()))?;
+    let header_bytes = fr.read_bytes(hlen as usize).await?;
+    let car_header =
+        CarHeader::from_cbor(&header_bytes).map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
     let head = *car_header
         .roots
         .first()
         .ok_or_else(|| AppError::Knowledge("CAR has no root".to_string()))?;
 
-    // Blocks: varint(cid_len + data_len) | cid | data
-    while pos < body.len() {
-        let (blen, n) = decode_varint(&body[pos..])?;
-        pos += n;
-        let end = pos + blen as usize;
-        let frame = body.get(pos..end).ok_or_else(|| AppError::Knowledge("truncated CAR block".to_string()))?;
-        pos = end;
+    // Block frames: varint(cid_len + data_len) | cid | data
+    while let Some(blen) = fr.read_varint().await? {
+        let frame = fr.read_bytes(blen as usize).await?;
         let cid = Cid::try_from(frame.to_vec()).map_err(|e| AppError::Knowledge(format!("bad CID in CAR: {e}")))?;
         let cid_len = cid.to_bytes().len();
-        let data = Bytes::copy_from_slice(&frame[cid_len..]);
+        let data = frame.slice(cid_len..); // zero-copy view of the data tail
         cold.put(&Block::from_parts(cid, data)).await.map_err(AppError::Storage)?;
     }
 
@@ -671,7 +721,7 @@ mod tests {
         let dir2 = tempfile::tempdir().unwrap();
         let dst = state_at(dir2.path().join("db")).await;
         assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 0);
-        let head = api_knowledge_import(State(dst.clone()), car).await.unwrap();
+        let head = api_knowledge_import(State(dst.clone()), Body::from(car)).await.unwrap();
         assert!(!head.0.head.is_empty());
 
         let stats = api_knowledge_stats(State(dst.clone())).await.unwrap();
