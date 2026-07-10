@@ -5,9 +5,11 @@
 //! Sync graph mutations run under a tokio mutex; `commit` flushes hot → cold.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::{extract::State, Json};
+use ipfrs_core::Cid;
 use ipfrs_knowledge::{project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -16,11 +18,35 @@ use super::{AppError, GatewayState};
 
 type Graph = Arc<Mutex<KnowledgeGraph<TieredStore>>>;
 
-fn graph(state: &GatewayState) -> Result<&Graph, AppError> {
+/// The gateway's knowledge feature: the graph plus a durable head pointer.
+#[derive(Clone)]
+pub(crate) struct KnowledgeState {
+    pub(crate) graph: Graph,
+    pub(crate) head_path: PathBuf,
+}
+
+/// Read a persisted head CID, if one was written by a previous run.
+pub(crate) fn read_head(path: &Path) -> Option<Cid> {
+    let s = std::fs::read_to_string(path).ok()?;
+    s.trim().parse::<Cid>().ok()
+}
+
+/// Durably record the current head CID (write-then-rename to avoid torn writes).
+fn write_head(path: &Path, head: &Cid) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, head.to_string())?;
+    std::fs::rename(&tmp, path)
+}
+
+fn kstate(state: &GatewayState) -> Result<&KnowledgeState, AppError> {
     state
         .knowledge
         .as_ref()
         .ok_or_else(|| AppError::FeatureDisabled("Knowledge graph not enabled".to_string()))
+}
+
+fn graph(state: &GatewayState) -> Result<&Graph, AppError> {
+    Ok(&kstate(state)?.graph)
 }
 
 // ---- request / response shapes ------------------------------------------
@@ -128,9 +154,12 @@ pub(super) async fn api_knowledge_add_relation(
 pub(super) async fn api_knowledge_commit(
     State(state): State<GatewayState>,
 ) -> Result<Json<CommitResp>, AppError> {
-    let mut kg = graph(&state)?.lock().await;
+    let ks = kstate(&state)?;
+    let mut kg = ks.graph.lock().await;
     let head = kg.commit().map_err(|e| AppError::Knowledge(e.to_string()))?;
     kg.store_mut().flush().await.map_err(|e| AppError::Knowledge(e.to_string()))?;
+    // Durably record the head so a restart reopens this exact graph.
+    write_head(&ks.head_path, &head).map_err(|e| AppError::Knowledge(format!("head write: {e}")))?;
     Ok(Json(CommitResp { head: head.to_string() }))
 }
 
@@ -180,17 +209,18 @@ mod tests {
     use super::*;
     use ipfrs_storage::BlockStoreConfig;
 
-    fn state_in(dir: &tempfile::TempDir) -> GatewayState {
-        GatewayState::new(BlockStoreConfig::testing().with_path(dir.path().join("db")))
+    async fn state_at(path: std::path::PathBuf) -> GatewayState {
+        GatewayState::new(BlockStoreConfig::testing().with_path(path))
             .unwrap()
             .with_knowledge()
+            .await
             .unwrap()
     }
 
     #[tokio::test]
     async fn add_search_commit_flow() {
         let dir = tempfile::tempdir().unwrap();
-        let st = state_in(&dir);
+        let st = state_at(dir.path().join("db")).await;
 
         for (kind, name) in [("person", "Ada Lovelace"), ("machine", "Analytical Engine")] {
             let _ = api_knowledge_add_entity(
@@ -233,6 +263,41 @@ mod tests {
         // projection contains the wikilink
         let proj = api_knowledge_projection(State(st.clone())).await.unwrap();
         assert!(proj.0.pages.get("ada-lovelace.md").unwrap().contains("[[analytical-engine]]"));
+    }
+
+    /// The head pointer + sled blocks let a fresh gateway state reopen the exact
+    /// graph after a "restart" (drop + reconstruct over the same path).
+    #[tokio::test]
+    async fn head_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+
+        // session 1: seed + commit (persists head file + flushes blocks), then close
+        {
+            let st = state_at(path.clone()).await;
+            for (kind, name) in [("person", "Ada Lovelace"), ("machine", "Analytical Engine")] {
+                let _ = api_knowledge_add_entity(
+                    State(st.clone()),
+                    Json(EntityReq { kind: kind.into(), name: name.into(), aliases: vec![], attrs: Default::default() }),
+                )
+                .await
+                .unwrap();
+            }
+            let head = api_knowledge_commit(State(st.clone())).await.unwrap();
+            assert!(!head.0.head.is_empty());
+        } // st dropped → sled DB closed
+
+        // session 2: fresh gateway state over the same path → graph reopened
+        let st2 = state_at(path).await;
+        let stats = api_knowledge_stats(State(st2.clone())).await.unwrap();
+        assert_eq!(stats.0.entities, 2, "graph reopened from persisted head");
+        let hits = api_knowledge_search(
+            State(st2),
+            Json(SearchReq { query: "lovelace".into(), k: Some(1) }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(hits.0.results[0].title, "Ada Lovelace", "index survived restart");
     }
 
     #[tokio::test]

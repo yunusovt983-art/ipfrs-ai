@@ -12,6 +12,7 @@ use ipfrs_core::Result as CoreResult;
 use ipfrs_semantic::{RouterConfig, SemanticRouter};
 use ipfrs_knowledge::{KnowledgeGraph, TieredStore};
 use ipfrs_storage::{BlockStoreConfig, BlockStoreTrait, SledBlockStore};
+use std::path::PathBuf;
 use ipfrs_tensorlogic::TensorLogicStore;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -30,8 +31,9 @@ pub struct GatewayState {
     pub(crate) store: Arc<SledBlockStore>,
     semantic: Option<Arc<SemanticRouter>>,
     tensorlogic: Option<Arc<TensorLogicStore<SledBlockStore>>>,
-    knowledge: Option<Arc<tokio::sync::Mutex<KnowledgeGraph<TieredStore>>>>,
+    knowledge: Option<knowledge::KnowledgeState>,
     network: Option<Arc<tokio::sync::Mutex<ipfrs_network::NetworkNode>>>,
+    storage_path: PathBuf,
     graphql_schema: Option<IpfrsSchema>,
     pub(crate) auth: Option<AuthState>,
 }
@@ -39,12 +41,14 @@ pub struct GatewayState {
 impl GatewayState {
     /// Create a new gateway state with the given storage configuration
     pub fn new(config: BlockStoreConfig) -> CoreResult<Self> {
+        let storage_path = config.path.clone();
         let store = SledBlockStore::new(config)?;
         Ok(Self {
             store: Arc::new(store),
             semantic: None,
             tensorlogic: None,
             knowledge: None,
+            storage_path,
             network: None,
             graphql_schema: None,
             auth: None,
@@ -85,12 +89,32 @@ impl GatewayState {
     }
 
     /// Enable the knowledge graph (ipfrs-knowledge over the sled block store).
-    pub fn with_knowledge(mut self) -> CoreResult<Self> {
+    ///
+    /// If a persisted head pointer exists next to the store, the graph is hydrated
+    /// and reopened from it — so knowledge survives a gateway restart. Otherwise a
+    /// fresh graph is started.
+    pub async fn with_knowledge(mut self) -> CoreResult<Self> {
+        let head_path = self.storage_path.join("knowledge_head");
         let cold: Arc<dyn BlockStoreTrait> = self.store.clone();
-        let graph = KnowledgeGraph::new(TieredStore::new(cold)).map_err(|e| {
-            ipfrs_core::Error::Internal(format!("Failed to init knowledge graph: {e}"))
-        })?;
-        self.knowledge = Some(Arc::new(tokio::sync::Mutex::new(graph)));
+        let mut ts = TieredStore::new(cold);
+
+        let graph = match knowledge::read_head(&head_path) {
+            Some(head) => {
+                ts.hydrate(&head).await.map_err(|e| {
+                    ipfrs_core::Error::Internal(format!("Failed to hydrate knowledge head: {e}"))
+                })?;
+                KnowledgeGraph::open(ts, &head).map_err(|e| {
+                    ipfrs_core::Error::Internal(format!("Failed to open knowledge head: {e}"))
+                })?
+            }
+            None => KnowledgeGraph::new(ts).map_err(|e| {
+                ipfrs_core::Error::Internal(format!("Failed to init knowledge graph: {e}"))
+            })?,
+        };
+        self.knowledge = Some(knowledge::KnowledgeState {
+            graph: Arc::new(tokio::sync::Mutex::new(graph)),
+            head_path,
+        });
         Ok(self)
     }
 
@@ -575,8 +599,8 @@ impl Gateway {
     }
 
     /// Enable the knowledge graph
-    pub fn with_knowledge(mut self) -> CoreResult<Self> {
-        self.state = self.state.with_knowledge()?;
+    pub async fn with_knowledge(mut self) -> CoreResult<Self> {
+        self.state = self.state.with_knowledge().await?;
         Ok(self)
     }
 
