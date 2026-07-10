@@ -6,28 +6,50 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::State,
     http::header,
     response::{IntoResponse, Response},
     Json,
 };
-use ipfrs_core::Cid;
+use ipfrs_core::{Block, Cid};
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
-use ipfrs_storage::{BlockStoreTrait, CarReader, CarWriter};
+use ipfrs_storage::{BlockStoreTrait, CarHeader};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-/// Unique temp-file sequence (avoids collisions between concurrent CAR requests).
-static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+// ---- minimal CARv1 framing (unsigned LEB128 varint) ----------------------
 
-fn temp_car_path(tag: &str) -> PathBuf {
-    let n = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("ipfrs-knowledge-{tag}-{}-{n}.car", std::process::id()))
+fn encode_varint(mut v: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let mut b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v != 0 {
+            b |= 0x80;
+        }
+        out.push(b);
+        if v == 0 {
+            break;
+        }
+    }
+    out
+}
+
+fn decode_varint(data: &[u8]) -> Result<(u64, usize), AppError> {
+    let mut result = 0u64;
+    let mut shift = 0u32;
+    for (i, &b) in data.iter().take(10).enumerate() {
+        result |= ((b & 0x7f) as u64) << shift;
+        if b & 0x80 == 0 {
+            return Ok((result, i + 1));
+        }
+        shift += 7;
+    }
+    Err(AppError::Knowledge("truncated CAR varint".to_string()))
 }
 
 use super::{AppError, GatewayState};
@@ -381,8 +403,9 @@ pub(super) async fn api_knowledge_gc(
 
 // ---- CAR export / import -------------------------------------------------
 
-/// GET /api/v0/knowledge/export.car — the whole graph (everything reachable from
-/// the head, history included) as one CAR file, root = head.
+/// GET /api/v0/knowledge/export — the whole graph (everything reachable from the
+/// head, history included) as one CARv1, root = head. Streamed block-by-block
+/// straight from the cold tier — no temp file, constant memory per block.
 pub(super) async fn api_knowledge_export(
     State(state): State<GatewayState>,
 ) -> Result<Response, AppError> {
@@ -392,59 +415,74 @@ pub(super) async fn api_knowledge_export(
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
 
     let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
-    let path = temp_car_path("export");
-    let mut writer = CarWriter::create(&path, vec![head])
-        .await
-        .map_err(|e| AppError::Knowledge(format!("car create: {e}")))?;
-    for cid in &live {
-        if let Some(block) = cold.get(cid).await.map_err(AppError::Storage)? {
-            writer.write_block(&block).await.map_err(|e| AppError::Knowledge(format!("car write: {e}")))?;
+    let header_cbor = CarHeader::new(vec![head])
+        .to_cbor()
+        .map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
+
+    let stream = async_stream::stream! {
+        // Header frame: varint(len) | header CBOR
+        let mut h = encode_varint(header_cbor.len() as u64);
+        h.extend_from_slice(&header_cbor);
+        yield Ok::<Bytes, std::io::Error>(Bytes::from(h));
+
+        // One frame per block: varint(cid_len + data_len) | cid | data
+        for cid in live {
+            if let Ok(Some(block)) = cold.get(&cid).await {
+                let cid_bytes = cid.to_bytes();
+                let data = block.data();
+                let mut frame = encode_varint((cid_bytes.len() + data.len()) as u64);
+                frame.extend_from_slice(&cid_bytes);
+                frame.extend_from_slice(data);
+                yield Ok(Bytes::from(frame));
+            }
         }
-    }
-    writer.finish().await.map_err(|e| AppError::Knowledge(format!("car finish: {e}")))?;
-    let bytes = tokio::fs::read(&path).await.map_err(|e| AppError::Knowledge(format!("car read: {e}")))?;
-    let _ = tokio::fs::remove_file(&path).await;
+    };
 
     Ok((
         [
             (header::CONTENT_TYPE, "application/vnd.ipld.car"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"knowledge.car\"",
-            ),
+            (header::CONTENT_DISPOSITION, "attachment; filename=\"knowledge.car\""),
         ],
-        bytes,
+        Body::from_stream(stream),
     )
         .into_response())
 }
 
-/// POST /api/v0/knowledge/import (body = raw CAR bytes) — load every block into the
-/// cold tier and adopt the CAR's first root as the new head.
+/// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse in memory, load
+/// every block into the cold tier, and adopt the CAR's first root as the new head.
 pub(super) async fn api_knowledge_import(
     State(state): State<GatewayState>,
     body: Bytes,
 ) -> Result<Json<CommitResp>, AppError> {
     let ks = kstate(&state)?;
     let mut guard = ks.graph.lock().await; // serialize with mutations
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
 
-    let path = temp_car_path("import");
-    tokio::fs::write(&path, &body).await.map_err(|e| AppError::Knowledge(format!("car spill: {e}")))?;
-    let mut reader = CarReader::open(&path)
-        .await
-        .map_err(|e| AppError::Knowledge(format!("car open: {e}")))?;
-    let head = reader
-        .roots()
+    // Header: varint(len) | header CBOR
+    let mut pos = 0usize;
+    let (hlen, n) = decode_varint(&body[pos..])?;
+    pos += n;
+    let hend = pos + hlen as usize;
+    let car_header = CarHeader::from_cbor(body.get(pos..hend).ok_or_else(|| AppError::Knowledge("truncated CAR header".to_string()))?)
+        .map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
+    pos = hend;
+    let head = *car_header
+        .roots
         .first()
-        .copied()
         .ok_or_else(|| AppError::Knowledge("CAR has no root".to_string()))?;
 
-    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
-    let mut imported = 0usize;
-    while let Some(block) = reader.read_block().await.map_err(|e| AppError::Knowledge(format!("car block: {e}")))? {
-        cold.put(&block).await.map_err(AppError::Storage)?;
-        imported += 1;
+    // Blocks: varint(cid_len + data_len) | cid | data
+    while pos < body.len() {
+        let (blen, n) = decode_varint(&body[pos..])?;
+        pos += n;
+        let end = pos + blen as usize;
+        let frame = body.get(pos..end).ok_or_else(|| AppError::Knowledge("truncated CAR block".to_string()))?;
+        pos = end;
+        let cid = Cid::try_from(frame.to_vec()).map_err(|e| AppError::Knowledge(format!("bad CID in CAR: {e}")))?;
+        let cid_len = cid.to_bytes().len();
+        let data = Bytes::copy_from_slice(&frame[cid_len..]);
+        cold.put(&Block::from_parts(cid, data)).await.map_err(AppError::Storage)?;
     }
-    let _ = tokio::fs::remove_file(&path).await;
 
     // Adopt the imported head: hydrate + reopen the running graph, persist the head.
     let mut ts = TieredStore::new(cold);
@@ -452,7 +490,6 @@ pub(super) async fn api_knowledge_import(
     *guard = KnowledgeGraph::open(ts, &head).map_err(|e| AppError::Knowledge(e.to_string()))?;
     write_head(&ks.head_path, &head).map_err(|e| AppError::Knowledge(format!("head write: {e}")))?;
 
-    let _ = imported;
     Ok(Json(CommitResp { head: head.to_string() }))
 }
 
