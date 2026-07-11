@@ -35,6 +35,7 @@ arrow-schema = { workspace = true }
 safetensors = { workspace = true }
 bytes = { workspace = true }
 memmap2 = { workspace = true }
+oxiarc-zstd = { workspace = true }
 
 # Async
 tokio = { workspace = true }

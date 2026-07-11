@@ -20,8 +20,34 @@ use futures::{Stream, StreamExt};
 use ipfrs_core::{Block, Cid, Ipld};
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
 use ipfrs_storage::{BlockStoreTrait, CarHeader};
+use oxiarc_zstd::{decode_all, streaming::ZstdStreamEncoder};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use std::io::Write as _;
+use tokio::sync::{mpsc, Mutex};
+use tokio_stream::wrappers::UnboundedReceiverStream;
+
+/// zstd frame magic (little-endian 0xFD2FB528).
+const ZSTD_MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
+
+/// A `std::io::Write` sink that forwards each write as a chunk to a channel, so a
+/// blocking zstd encoder can feed an async response body.
+struct ChanWriter(mpsc::UnboundedSender<Result<Bytes, std::io::Error>>);
+
+impl std::io::Write for ChanWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .send(Ok(Bytes::copy_from_slice(buf)))
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "receiver dropped"))?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn wants_zstd(c: &Option<String>) -> bool {
+    matches!(c.as_deref(), Some("zstd") | Some("1") | Some("true"))
+}
 
 // ---- minimal CARv1 framing (unsigned LEB128 varint) ----------------------
 
@@ -102,6 +128,17 @@ where
             return Err(AppError::Knowledge("truncated CAR frame".to_string()));
         }
         Ok(self.buf.split_to(n).freeze())
+    }
+
+    /// Drain the rest of the stream (plus what's buffered) into one `Bytes`.
+    async fn read_all(&mut self) -> Result<Bytes, AppError> {
+        loop {
+            let want = self.buf.len() + 1;
+            if !self.ensure(want).await? {
+                break;
+            }
+        }
+        Ok(self.buf.split().freeze())
     }
 }
 
@@ -274,6 +311,14 @@ pub(super) struct DiffParams {
     to: String,
     #[serde(default)]
     from: Option<String>,
+    #[serde(default)]
+    compress: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct CompressParams {
+    #[serde(default)]
+    compress: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -528,65 +573,91 @@ pub(super) async fn api_knowledge_history(
 
 // ---- CAR export / import -------------------------------------------------
 
+/// One CARv1 frame for `cid`: varint(cid_len + data_len) | cid | data.
+async fn car_block_frame(cold: &Arc<dyn BlockStoreTrait>, cid: &Cid) -> Option<Vec<u8>> {
+    let block = cold.get(cid).await.ok()??;
+    let cid_bytes = cid.to_bytes();
+    let data = block.data();
+    let mut frame = encode_varint((cid_bytes.len() + data.len()) as u64);
+    frame.extend_from_slice(&cid_bytes);
+    frame.extend_from_slice(data);
+    Some(frame)
+}
+
 /// Build a streamed CARv1 response: header (root = `root`) then one frame per CID in
-/// `cids`, each block fetched from the cold tier on demand (constant memory).
+/// `cids`, each block fetched on demand (constant memory). When `compress`, the CAR
+/// is zstd-encoded on the fly through a streaming encoder.
 fn car_response(
     cold: Arc<dyn BlockStoreTrait>,
     root: Cid,
     cids: HashSet<Cid>,
-    filename: &'static str,
+    filename: &str,
+    compress: bool,
 ) -> Result<Response, AppError> {
     let header_cbor = CarHeader::new(vec![root])
         .to_cbor()
         .map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
+    let mut header_frame = encode_varint(header_cbor.len() as u64);
+    header_frame.extend_from_slice(&header_cbor);
 
-    let stream = async_stream::stream! {
-        // Header frame: varint(len) | header CBOR
-        let mut h = encode_varint(header_cbor.len() as u64);
-        h.extend_from_slice(&header_cbor);
-        yield Ok::<Bytes, std::io::Error>(Bytes::from(h));
-
-        // One frame per block: varint(cid_len + data_len) | cid | data
-        for cid in cids {
-            if let Ok(Some(block)) = cold.get(&cid).await {
-                let cid_bytes = cid.to_bytes();
-                let data = block.data();
-                let mut frame = encode_varint((cid_bytes.len() + data.len()) as u64);
-                frame.extend_from_slice(&cid_bytes);
-                frame.extend_from_slice(data);
-                yield Ok(Bytes::from(frame));
+    let body = if compress {
+        // Stream the CAR through a blocking zstd encoder whose sink feeds a channel.
+        let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, std::io::Error>>();
+        tokio::spawn(async move {
+            let mut enc = ZstdStreamEncoder::new(ChanWriter(tx), 3);
+            if enc.write_all(&header_frame).is_err() {
+                return;
             }
-        }
+            for cid in cids {
+                if let Some(frame) = car_block_frame(&cold, &cid).await {
+                    if enc.write_all(&frame).is_err() {
+                        return;
+                    }
+                }
+            }
+            let _ = enc.finish(); // flush tail; drop ChanWriter -> close stream
+        });
+        Body::from_stream(UnboundedReceiverStream::new(rx))
+    } else {
+        let stream = async_stream::stream! {
+            yield Ok::<Bytes, std::io::Error>(Bytes::from(header_frame));
+            for cid in cids {
+                if let Some(frame) = car_block_frame(&cold, &cid).await {
+                    yield Ok(Bytes::from(frame));
+                }
+            }
+        };
+        Body::from_stream(stream)
     };
 
-    let disposition = format!("attachment; filename=\"{filename}\"");
+    let name = if compress { format!("{filename}.zst") } else { filename.to_string() };
     Ok((
         [
             (header::CONTENT_TYPE, "application/vnd.ipld.car".to_string()),
-            (header::CONTENT_DISPOSITION, disposition),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{name}\"")),
         ],
-        Body::from_stream(stream),
+        body,
     )
         .into_response())
 }
 
-/// GET /api/v0/knowledge/export — the whole graph (everything reachable from the
-/// head, history included) as one CARv1, root = head. Streamed block-by-block.
+/// GET /api/v0/knowledge/export[?compress=zstd] — the whole graph (reachable from
+/// the head, history included) as one CARv1, root = head. Streamed block-by-block.
 pub(super) async fn api_knowledge_export(
     State(state): State<GatewayState>,
+    axum::extract::Query(params): axum::extract::Query<CompressParams>,
 ) -> Result<Response, AppError> {
     let ks = kstate(&state)?;
     let head = read_head(&ks.head_path)
         .ok_or_else(|| AppError::NotFound("no committed knowledge head to export".to_string()))?;
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
     let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
-    car_response(cold, head, live, "knowledge.car")
+    car_response(cold, head, live, "knowledge.car", wants_zstd(&params.compress))
 }
 
-/// GET /api/v0/knowledge/diff?to=<cid>[&from=<cid>] — an incremental CARv1 with
-/// root = `to` containing only blocks reachable from `to` but not from `from`
-/// (a full export when `from` is omitted). Applied on top of a store that already
-/// has `from`, it reconstructs `to`.
+/// GET /api/v0/knowledge/diff?to=<cid>[&from=<cid>][&compress=zstd] — an incremental
+/// CARv1 with root = `to` containing blocks reachable from `to` but not from `from`
+/// (a full export when `from` is omitted).
 pub(super) async fn api_knowledge_diff(
     State(state): State<GatewayState>,
     axum::extract::Query(params): axum::extract::Query<DiffParams>,
@@ -601,23 +672,21 @@ pub(super) async fn api_knowledge_diff(
         let base = gc::reachable(&cold, &[from], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
         delta.retain(|c| !base.contains(c));
     }
-    car_response(cold, to, delta, "knowledge-diff.car")
+    car_response(cold, to, delta, "knowledge-diff.car", wants_zstd(&params.compress))
 }
 
 /// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse the body as a
 /// stream (constant memory, no whole-body buffering), load every block into the
 /// cold tier, and adopt the CAR's first root as the new head. Incremental CARs work
 /// too: missing base blocks are tolerated as long as the head resolves.
-pub(super) async fn api_knowledge_import(
-    State(state): State<GatewayState>,
-    body: Body,
-) -> Result<Json<CommitResp>, AppError> {
-    let ks = kstate(&state)?;
-    let mut guard = ks.graph.lock().await; // serialize with mutations
-    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
-
-    let mut fr = Framer::new(body.into_data_stream());
-
+/// Parse a CARv1 from a frame stream into the cold tier; returns the first root.
+async fn import_frames<S, E>(
+    fr: &mut Framer<S>,
+    cold: &Arc<dyn BlockStoreTrait>,
+) -> Result<Cid, AppError>
+where
+    S: Stream<Item = Result<Bytes, E>> + Unpin,
+{
     // Header frame: varint(len) | header CBOR
     let hlen = fr.read_varint().await?.ok_or_else(|| AppError::Knowledge("empty CAR".to_string()))?;
     let header_bytes = fr.read_bytes(hlen as usize).await?;
@@ -636,6 +705,27 @@ pub(super) async fn api_knowledge_import(
         let data = frame.slice(cid_len..); // zero-copy view of the data tail
         cold.put(&Block::from_parts(cid, data)).await.map_err(AppError::Storage)?;
     }
+    Ok(head)
+}
+
+pub(super) async fn api_knowledge_import(
+    State(state): State<GatewayState>,
+    body: Body,
+) -> Result<Json<CommitResp>, AppError> {
+    let ks = kstate(&state)?;
+    let mut guard = ks.graph.lock().await; // serialize with mutations
+    let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
+
+    let mut fr = Framer::new(body.into_data_stream());
+    let head = if fr.ensure(4).await? && fr.buf.starts_with(&ZSTD_MAGIC) {
+        // zstd-wrapped: drain, decompress, then parse the plain CAR in memory.
+        let compressed = fr.read_all().await?;
+        let raw = decode_all(&compressed).map_err(|e| AppError::Knowledge(format!("zstd decode: {e}")))?;
+        let once = futures::stream::once(std::future::ready(Ok::<Bytes, std::convert::Infallible>(Bytes::from(raw))));
+        import_frames(&mut Framer::new(once), &cold).await?
+    } else {
+        import_frames(&mut fr, &cold).await?
+    };
 
     // Adopt the imported head: hydrate + reopen the running graph, persist the head.
     let mut ts = TieredStore::new(cold);
@@ -816,7 +906,9 @@ mod tests {
         let _ = api_knowledge_commit(State(src.clone())).await.unwrap();
 
         // export → CAR bytes
-        let resp = api_knowledge_export(State(src)).await.unwrap();
+        let resp = api_knowledge_export(State(src), axum::extract::Query(CompressParams { compress: None }))
+            .await
+            .unwrap();
         let car = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         assert!(car.len() > 32, "non-trivial CAR");
 
@@ -903,19 +995,19 @@ mod tests {
 
         // base = full CAR at head1; delta = head2 minus head1; full2 = full head2
         let base = car_bytes(
-            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head1.clone(), from: None }))
+            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head1.clone(), from: None, compress: None }))
                 .await
                 .unwrap(),
         )
         .await;
         let full2 = car_bytes(
-            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head2.clone(), from: None }))
+            api_knowledge_diff(State(src.clone()), Query(DiffParams { to: head2.clone(), from: None, compress: None }))
                 .await
                 .unwrap(),
         )
         .await;
         let delta = car_bytes(
-            api_knowledge_diff(State(src), Query(DiffParams { to: head2.clone(), from: Some(head1) }))
+            api_knowledge_diff(State(src), Query(DiffParams { to: head2.clone(), from: Some(head1), compress: None }))
                 .await
                 .unwrap(),
         )
@@ -965,6 +1057,47 @@ mod tests {
         assert_eq!(h.entries[1].prev.as_deref(), Some(heads[0].as_str()));
         assert_eq!(h.entries[2].prev, None, "first commit has no prev");
         assert!(h.entries.iter().all(|e| e.vindex.is_some() && !e.index.is_empty()));
+    }
+
+    /// A zstd-compressed export imports transparently (magic-detected + decoded) and
+    /// is meaningfully smaller than the plain CAR.
+    #[tokio::test]
+    async fn zstd_export_import_roundtrip() {
+        use axum::extract::Query;
+
+        async fn car_bytes(resp: Response) -> Vec<u8> {
+            axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()
+        }
+
+        let dir1 = tempfile::tempdir().unwrap();
+        let src = state_at(dir1.path().join("db")).await;
+        for i in 0..8 {
+            let _ = api_knowledge_add_entity(
+                State(src.clone()),
+                Json(EntityReq { kind: "person".into(), name: format!("Person {i}"), aliases: vec![], attrs: Default::default() }),
+            )
+            .await
+            .unwrap();
+        }
+        let _ = api_knowledge_commit(State(src.clone())).await.unwrap();
+
+        let plain = car_bytes(
+            api_knowledge_export(State(src.clone()), Query(CompressParams { compress: None })).await.unwrap(),
+        )
+        .await;
+        let zresp = api_knowledge_export(State(src), Query(CompressParams { compress: Some("zstd".into()) })).await.unwrap();
+        let z = car_bytes(zresp).await;
+        assert_eq!(&z[..4], &ZSTD_MAGIC, "zstd frame magic");
+        assert!(z.len() < plain.len(), "compressed smaller ({} < {})", z.len(), plain.len());
+
+        // import the compressed CAR into a fresh gateway — transparently decoded
+        let dir2 = tempfile::tempdir().unwrap();
+        let dst = state_at(dir2.path().join("db")).await;
+        let head = api_knowledge_import(State(dst.clone()), Body::from(z)).await.unwrap();
+        assert!(!head.0.head.is_empty());
+        assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 8);
+        let hits = api_knowledge_search(State(dst), Json(SearchReq { query: "Person 3".into(), k: Some(1) })).await.unwrap();
+        assert_eq!(hits.0.results[0].title, "Person 3");
     }
 
     #[tokio::test]
