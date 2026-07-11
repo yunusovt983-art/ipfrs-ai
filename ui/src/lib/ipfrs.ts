@@ -401,10 +401,10 @@ export class IpfrsClient {
     });
   }
 
-  /** GET /api/v0/knowledge/export — the whole graph as one CAR blob. */
+  /** GET /api/v0/knowledge/export — the whole graph as one zstd-compressed CAR blob. */
   async knowledgeExport(): Promise<Blob | null> {
     try {
-      const res = await fetch(this.url("/api/v0/knowledge/export"));
+      const res = await fetch(this.url("/api/v0/knowledge/export?compress=zstd"));
       if (!res.ok) return null;
       return await res.blob();
     } catch {
@@ -412,10 +412,10 @@ export class IpfrsClient {
     }
   }
 
-  /** GET /api/v0/knowledge/diff — incremental CAR from `from` to `to`. */
+  /** GET /api/v0/knowledge/diff — incremental CAR from `from` to `to` (zstd). */
   async knowledgeDiff(to: string, from: string): Promise<Blob | null> {
     try {
-      const q = `?to=${encodeURIComponent(to)}&from=${encodeURIComponent(from)}`;
+      const q = `?to=${encodeURIComponent(to)}&from=${encodeURIComponent(from)}&compress=zstd`;
       const res = await fetch(this.url("/api/v0/knowledge/diff" + q));
       if (!res.ok) return null;
       return await res.blob();

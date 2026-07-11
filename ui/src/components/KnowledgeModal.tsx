@@ -137,7 +137,7 @@ export function KnowledgeModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "knowledge.car";
+    a.download = "knowledge.car.zst";
     a.click();
     URL.revokeObjectURL(url);
     setStatus(`live · экспортировано ${(blob.size / 1024).toFixed(1)} KB`);
@@ -156,7 +156,7 @@ export function KnowledgeModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "knowledge-diff.car";
+    a.download = "knowledge-diff.car.zst";
     a.click();
     URL.revokeObjectURL(url);
     setStatus(`live · diff ${(blob.size / 1024).toFixed(1)} KB (${from.slice(0, 8)}…→${to.slice(0, 8)}…)`);
