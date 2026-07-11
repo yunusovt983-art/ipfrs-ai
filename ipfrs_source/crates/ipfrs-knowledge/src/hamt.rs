@@ -21,6 +21,9 @@ enum Slot {
     Branch(Cid),
 }
 
+/// A 32-byte key has exactly 64 nibbles; no legitimate trie descends beyond that.
+const MAX_DEPTH: usize = 64;
+
 fn nibble(key: &EntityId, depth: usize) -> usize {
     let byte = key.0[depth / 2];
     (if depth.is_multiple_of(2) { byte >> 4 } else { byte & 0x0f }) as usize
@@ -108,6 +111,9 @@ fn insert_slots<S: BlockStore>(
     val: Cid,
     depth: usize,
 ) -> KResult<Cid> {
+    if depth >= MAX_DEPTH {
+        return Err(KError::Graph("hamt depth exceeded".into()));
+    }
     let nib = nibble(&key, depth);
     let new = match slots[nib] {
         Slot::Empty => Slot::Leaf(key, val),
@@ -133,6 +139,11 @@ pub fn get<S: BlockStore>(store: &S, root: &Cid, key: &EntityId) -> KResult<Opti
     let mut cur = *root;
     let mut depth = 0;
     loop {
+        // A crafted (imported) trie could nest Branches past the 64-nibble key; stop
+        // rather than index out of bounds in `nibble`.
+        if depth >= MAX_DEPTH {
+            return Ok(None);
+        }
         let slots = load(store, &cur)?;
         match slots[nibble(key, depth)] {
             Slot::Empty => return Ok(None),

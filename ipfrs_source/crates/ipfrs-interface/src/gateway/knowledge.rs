@@ -17,33 +17,23 @@ use axum::{
 };
 use bytes::{Buf, BytesMut};
 use futures::{Stream, StreamExt};
-use ipfrs_core::{Block, Cid, Ipld};
+use ipfrs_core::{Block, Cid, CidBuilder, Ipld};
 use ipfrs_knowledge::{gc, project, EntityId, EntitySpec, KnowledgeGraph, KnowledgeNode, TieredStore};
 use ipfrs_storage::{BlockStoreTrait, CarHeader};
-use oxiarc_zstd::{decode_all, streaming::ZstdStreamEncoder};
+use oxiarc_zstd::streaming::{ZstdStreamDecoder, ZstdStreamEncoder};
 use serde::{Deserialize, Serialize};
-use std::io::Write as _;
-use tokio::sync::{mpsc, Mutex};
-use tokio_stream::wrappers::UnboundedReceiverStream;
+use std::io::{Read as _, Write as _};
+use tokio::sync::Mutex;
 
 /// zstd frame magic (little-endian 0xFD2FB528).
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 
-/// A `std::io::Write` sink that forwards each write as a chunk to a channel, so a
-/// blocking zstd encoder can feed an async response body.
-struct ChanWriter(mpsc::UnboundedSender<Result<Bytes, std::io::Error>>);
-
-impl std::io::Write for ChanWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
-            .send(Ok(Bytes::copy_from_slice(buf)))
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "receiver dropped"))?;
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
+/// Import limits (untrusted CAR bodies): cap compressed input, total decompressed
+/// bytes, and any single frame, so a decompression bomb or a huge varint cannot
+/// exhaust memory.
+const MAX_IMPORT_COMPRESSED: usize = 128 * 1024 * 1024; // 128 MiB on the wire
+const MAX_IMPORT_BYTES: usize = 1024 * 1024 * 1024; // 1 GiB decompressed / total
+const MAX_CAR_FRAME: usize = 16 * 1024 * 1024; // 16 MiB per header/block frame
 
 fn wants_zstd(c: &Option<String>) -> bool {
     matches!(c.as_deref(), Some("zstd") | Some("1") | Some("true"))
@@ -130,9 +120,13 @@ where
         Ok(self.buf.split_to(n).freeze())
     }
 
-    /// Drain the rest of the stream (plus what's buffered) into one `Bytes`.
-    async fn read_all(&mut self) -> Result<Bytes, AppError> {
+    /// Drain the rest of the stream (plus what's buffered) into one `Bytes`, failing
+    /// if it would exceed `max` — bounds an untrusted compressed body.
+    async fn read_all_capped(&mut self, max: usize) -> Result<Bytes, AppError> {
         loop {
+            if self.buf.len() > max {
+                return Err(AppError::Knowledge("compressed CAR exceeds size limit".to_string()));
+            }
             let want = self.buf.len() + 1;
             if !self.ensure(want).await? {
                 break;
@@ -140,6 +134,24 @@ where
         }
         Ok(self.buf.split().freeze())
     }
+}
+
+/// Decode a zstd frame with a hard output cap — refuses decompression bombs.
+fn zstd_decode_capped(compressed: &[u8], max: usize) -> Result<Vec<u8>, AppError> {
+    let mut dec = ZstdStreamDecoder::new(std::io::Cursor::new(compressed));
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 65536];
+    loop {
+        let n = dec.read(&mut chunk).map_err(|e| AppError::Knowledge(format!("zstd decode: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        if out.len() + n > max {
+            return Err(AppError::Knowledge("decompressed CAR exceeds size limit".to_string()));
+        }
+        out.extend_from_slice(&chunk[..n]);
+    }
+    Ok(out)
 }
 
 use super::{AppError, GatewayState};
@@ -584,10 +596,14 @@ async fn car_block_frame(cold: &Arc<dyn BlockStoreTrait>, cid: &Cid) -> Option<V
     Some(frame)
 }
 
-/// Build a streamed CARv1 response: header (root = `root`) then one frame per CID in
-/// `cids`, each block fetched on demand (constant memory). When `compress`, the CAR
-/// is zstd-encoded on the fly through a streaming encoder.
-fn car_response(
+/// Build a CARv1 response: header (root = `root`) then one frame per CID in `cids`.
+///
+/// The plain path streams block-by-block from the cold tier (constant memory, with
+/// natural backpressure from the response body). The `compress` path buffers the
+/// plain CAR (bounded by graph size), zstd-encodes it, and returns the compressed
+/// bytes — simple and deadlock-free; memory is bounded by the data, not by client
+/// speed.
+async fn car_response(
     cold: Arc<dyn BlockStoreTrait>,
     root: Cid,
     cids: HashSet<Cid>,
@@ -601,23 +617,16 @@ fn car_response(
     header_frame.extend_from_slice(&header_cbor);
 
     let body = if compress {
-        // Stream the CAR through a blocking zstd encoder whose sink feeds a channel.
-        let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, std::io::Error>>();
-        tokio::spawn(async move {
-            let mut enc = ZstdStreamEncoder::new(ChanWriter(tx), 3);
-            if enc.write_all(&header_frame).is_err() {
-                return;
+        let mut plain = header_frame;
+        for cid in &cids {
+            if let Some(frame) = car_block_frame(&cold, cid).await {
+                plain.extend_from_slice(&frame);
             }
-            for cid in cids {
-                if let Some(frame) = car_block_frame(&cold, &cid).await {
-                    if enc.write_all(&frame).is_err() {
-                        return;
-                    }
-                }
-            }
-            let _ = enc.finish(); // flush tail; drop ChanWriter -> close stream
-        });
-        Body::from_stream(UnboundedReceiverStream::new(rx))
+        }
+        let mut enc = ZstdStreamEncoder::new(Vec::<u8>::new(), 3);
+        enc.write_all(&plain).map_err(|e| AppError::Knowledge(format!("zstd encode: {e}")))?;
+        let compressed = enc.finish().map_err(|e| AppError::Knowledge(format!("zstd finish: {e}")))?;
+        Body::from(compressed)
     } else {
         let stream = async_stream::stream! {
             yield Ok::<Bytes, std::io::Error>(Bytes::from(header_frame));
@@ -652,7 +661,7 @@ pub(super) async fn api_knowledge_export(
         .ok_or_else(|| AppError::NotFound("no committed knowledge head to export".to_string()))?;
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
     let live = gc::reachable(&cold, &[head], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
-    car_response(cold, head, live, "knowledge.car", wants_zstd(&params.compress))
+    car_response(cold, head, live, "knowledge.car", wants_zstd(&params.compress)).await
 }
 
 /// GET /api/v0/knowledge/diff?to=<cid>[&from=<cid>][&compress=zstd] — an incremental
@@ -672,7 +681,7 @@ pub(super) async fn api_knowledge_diff(
         let base = gc::reachable(&cold, &[from], true).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
         delta.retain(|c| !base.contains(c));
     }
-    car_response(cold, to, delta, "knowledge-diff.car", wants_zstd(&params.compress))
+    car_response(cold, to, delta, "knowledge-diff.car", wants_zstd(&params.compress)).await
 }
 
 /// POST /api/v0/knowledge/import (body = raw CARv1 bytes) — parse the body as a
@@ -680,6 +689,8 @@ pub(super) async fn api_knowledge_diff(
 /// cold tier, and adopt the CAR's first root as the new head. Incremental CARs work
 /// too: missing base blocks are tolerated as long as the head resolves.
 /// Parse a CARv1 from a frame stream into the cold tier; returns the first root.
+/// Every block is **content-verified** (its CID must equal the dag-cbor hash of its
+/// data) before storage, and per-frame + total-size limits bound memory/disk.
 async fn import_frames<S, E>(
     fr: &mut Framer<S>,
     cold: &Arc<dyn BlockStoreTrait>,
@@ -689,6 +700,9 @@ where
 {
     // Header frame: varint(len) | header CBOR
     let hlen = fr.read_varint().await?.ok_or_else(|| AppError::Knowledge("empty CAR".to_string()))?;
+    if hlen as usize > MAX_CAR_FRAME {
+        return Err(AppError::Knowledge("CAR header too large".to_string()));
+    }
     let header_bytes = fr.read_bytes(hlen as usize).await?;
     let car_header =
         CarHeader::from_cbor(&header_bytes).map_err(|e| AppError::Knowledge(format!("car header: {e}")))?;
@@ -698,11 +712,28 @@ where
         .ok_or_else(|| AppError::Knowledge("CAR has no root".to_string()))?;
 
     // Block frames: varint(cid_len + data_len) | cid | data
+    let mut total = 0usize;
     while let Some(blen) = fr.read_varint().await? {
+        if blen as usize > MAX_CAR_FRAME {
+            return Err(AppError::Knowledge("CAR block frame too large".to_string()));
+        }
+        total = total.saturating_add(blen as usize);
+        if total > MAX_IMPORT_BYTES {
+            return Err(AppError::Knowledge("CAR exceeds total size limit".to_string()));
+        }
         let frame = fr.read_bytes(blen as usize).await?;
         let cid = Cid::try_from(frame.to_vec()).map_err(|e| AppError::Knowledge(format!("bad CID in CAR: {e}")))?;
         let cid_len = cid.to_bytes().len();
+        if cid_len > frame.len() {
+            return Err(AppError::Knowledge("CAR frame shorter than its CID".to_string()));
+        }
         let data = frame.slice(cid_len..); // zero-copy view of the data tail
+        // Content-address verification: reject any block whose bytes don't hash to
+        // its CID (all knowledge blocks are dag-cbor) — prevents store poisoning.
+        let computed = CidBuilder::new().build_dag_cbor(&data).map_err(AppError::Storage)?;
+        if computed != cid {
+            return Err(AppError::Knowledge("CAR block CID does not match its data".to_string()));
+        }
         cold.put(&Block::from_parts(cid, data)).await.map_err(AppError::Storage)?;
     }
     Ok(head)
@@ -713,24 +744,33 @@ pub(super) async fn api_knowledge_import(
     body: Body,
 ) -> Result<Json<CommitResp>, AppError> {
     let ks = kstate(&state)?;
-    let mut guard = ks.graph.lock().await; // serialize with mutations
     let cold: Arc<dyn BlockStoreTrait> = state.store.clone();
 
+    // 1. Ingest blocks into the (content-addressed, idempotent) cold tier WITHOUT
+    //    holding the graph lock — a slow uploader can't freeze the other endpoints.
     let mut fr = Framer::new(body.into_data_stream());
     let head = if fr.ensure(4).await? && fr.buf.starts_with(&ZSTD_MAGIC) {
-        // zstd-wrapped: drain, decompress, then parse the plain CAR in memory.
-        let compressed = fr.read_all().await?;
-        let raw = decode_all(&compressed).map_err(|e| AppError::Knowledge(format!("zstd decode: {e}")))?;
+        // zstd-wrapped: bounded drain + capped decode, then parse the plain CAR.
+        let compressed = fr.read_all_capped(MAX_IMPORT_COMPRESSED).await?;
+        let raw = zstd_decode_capped(&compressed, MAX_IMPORT_BYTES)?;
         let once = futures::stream::once(std::future::ready(Ok::<Bytes, std::convert::Infallible>(Bytes::from(raw))));
         import_frames(&mut Framer::new(once), &cold).await?
     } else {
         import_frames(&mut fr, &cold).await?
     };
 
-    // Adopt the imported head: hydrate + reopen the running graph, persist the head.
+    // 2. Adopt the head under the lock only: hydrate + open + a completeness check
+    //    (entity_ids walks the whole index HAMT). If the CAR was incomplete, the
+    //    open/walk fails and we return WITHOUT replacing the graph or head.
     let mut ts = TieredStore::new(cold);
     ts.hydrate(&head).await.map_err(|e| AppError::Knowledge(e.to_string()))?;
-    *guard = KnowledgeGraph::open(ts, &head).map_err(|e| AppError::Knowledge(e.to_string()))?;
+    let new_graph = KnowledgeGraph::open(ts, &head).map_err(|e| AppError::Knowledge(e.to_string()))?;
+    new_graph
+        .entity_ids()
+        .map_err(|_| AppError::Knowledge("imported CAR is incomplete (index unreadable)".to_string()))?;
+
+    let mut guard = ks.graph.lock().await;
+    *guard = new_graph;
     write_head(&ks.head_path, &head).map_err(|e| AppError::Knowledge(format!("head write: {e}")))?;
 
     Ok(Json(CommitResp { head: head.to_string() }))
@@ -1098,6 +1138,30 @@ mod tests {
         assert_eq!(api_knowledge_stats(State(dst.clone())).await.unwrap().0.entities, 8);
         let hits = api_knowledge_search(State(dst), Json(SearchReq { query: "Person 3".into(), k: Some(1) })).await.unwrap();
         assert_eq!(hits.0.results[0].title, "Person 3");
+    }
+
+    /// A CAR whose block CID does not hash its data is rejected (store poisoning).
+    #[tokio::test]
+    async fn import_rejects_poisoned_cid() {
+        let dir = tempfile::tempdir().unwrap();
+        let dst = state_at(dir.path().join("db")).await;
+
+        // header root = a valid dag-cbor CID, then one block with mismatched data
+        let real = Ipld::String("real".into()).to_dag_cbor().unwrap();
+        let c = CidBuilder::new().build_dag_cbor(&real).unwrap();
+        let header = CarHeader::new(vec![c]).to_cbor().unwrap();
+        let mut car = encode_varint(header.len() as u64);
+        car.extend_from_slice(&header);
+
+        let cid_bytes = c.to_bytes();
+        let evil = b"evil bytes that do not hash to the claimed CID";
+        let mut frame = encode_varint((cid_bytes.len() + evil.len()) as u64);
+        frame.extend_from_slice(&cid_bytes);
+        frame.extend_from_slice(evil);
+        car.extend_from_slice(&frame);
+
+        let r = api_knowledge_import(State(dst), Body::from(car)).await;
+        assert!(r.is_err(), "poisoned CID must be rejected");
     }
 
     #[tokio::test]

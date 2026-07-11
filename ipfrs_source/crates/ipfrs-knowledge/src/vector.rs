@@ -164,8 +164,12 @@ impl VectorIndex {
             Ipld::Map(m) => m,
             _ => return Err(KError::Decode("vindex not a map".into())),
         };
+        // Validate `dim` from untrusted input: it becomes a modulo divisor and an
+        // allocation size in `embed`, so 0 (divide-by-zero) or a huge value (OOM)
+        // must be rejected rather than trusted.
         let dim = match m.get("dim") {
-            Some(Ipld::Integer(n)) => *n as usize,
+            Some(Ipld::Integer(n)) if *n >= 1 && *n <= 65_536 => *n as usize,
+            Some(Ipld::Integer(_)) => return Err(KError::Decode("vindex dim out of range".into())),
             _ => return Err(KError::Decode("vindex missing dim".into())),
         };
         let list = match m.get("entries") {
@@ -186,7 +190,11 @@ impl VectorIndex {
                 Some(Ipld::Bytes(b)) => b,
                 _ => return Err(KError::Decode("vindex entry missing vec".into())),
             };
-            let emb = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            let emb: Vec<f32> =
+                bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+            if emb.len() != dim {
+                return Err(KError::Decode("vindex entry vector length != dim".into()));
+            }
             entries.push((cid, emb));
         }
         Ok(Self { dim, entries })
@@ -297,6 +305,37 @@ mod tests {
         assert_eq!(top, kg.entity_cid(&ada).unwrap().unwrap(), "lovelace -> Ada");
         let top = ix.search_text("analytical", 1)[0].0;
         assert_eq!(top, kg.entity_cid(&eng).unwrap().unwrap(), "analytical -> Engine");
+    }
+
+    #[test]
+    fn decode_rejects_out_of_range_dim() {
+        use ipfrs_core::Ipld;
+        // dim = 0 would divide-by-zero in embed; must be rejected at decode.
+        let bad = Ipld::Map(
+            [
+                ("@type".to_string(), Ipld::String("vindex".into())),
+                ("dim".to_string(), Ipld::Integer(0)),
+                ("entries".to_string(), Ipld::List(vec![])),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .to_dag_cbor()
+        .unwrap();
+        assert!(VectorIndex::decode(&bad).is_err());
+
+        let huge = Ipld::Map(
+            [
+                ("@type".to_string(), Ipld::String("vindex".into())),
+                ("dim".to_string(), Ipld::Integer(1_000_000)),
+                ("entries".to_string(), Ipld::List(vec![])),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .to_dag_cbor()
+        .unwrap();
+        assert!(VectorIndex::decode(&huge).is_err());
     }
 
     #[test]
